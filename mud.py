@@ -1,6 +1,10 @@
 import sys
 import socket
 import SocketServer
+import logging
+import traceback
+
+logging.basicConfig(level=logging.DEBUG)
 
 HOST = ''
 PORT = 50000
@@ -11,33 +15,106 @@ MAX_BAD = 10
 souls = []
 
 
-class ThreadingMUDServer(SocketServer.ThreadingTCPServer):
+class MudThread:
+    """Mix-in class to handle each request in a new thread."""
+
+    # Decides how threads will act upon termination of the
+    # main process
+    daemon_threads = False
+
+    def process_request_thread(self, request, client_address):
+        """Same as in BaseServer but as a thread.
+
+        In addition, exception handling is done here.
+
+        """
+        try:
+            self.finish_request(request, client_address)
+            self.close_request(request)
+        except:
+            self.handle_error(request, client_address)
+            self.close_request(request)
+
+    def process_request(self, request, client_address):
+        """Start a new thread to process the request."""
+        import threading
+        t = threading.Thread(target = self.process_request_thread,
+                             args = (request, client_address))
+        if self.daemon_threads:
+            t.setDaemon (1)
+        t.start()
+
+
+class ThreadingMudServer(MudThread, SocketServer.TCPServer):
+    """Standard ThreadingTCPServer, extended to allow customization.
+    """
     allow_reuse_address = True
     pass
 
 
 class MudRequestHandler(SocketServer.BaseRequestHandler):
+    """Mud request handler
+
+    Basically sets up a soul object and pass the request controls to
+    it.  This may be redesigned in the future.
+    """
     def setup(self):
-        print self.client_address, 'connected.'
-        soul = Soul(self.request)
-        soul.send('hi ' + str(self.client_address) + '\n')
-        souls.append(soul)
+        logging.debug('%s connected' % str(self.client_address))
+        soul = Soul(self)
         self.soul = soul
+        souls.append(soul)
+
+    def handle(self):
+        self.soul.handle()
+
+    def finish(self):
+        soul = self.soul
+        if soul in souls:
+            # bye
+            souls.remove(soul)
+        logging.debug('%s disconnecting' % 
+                str(self.client_address))
+        try:
+            soul.quit()
+        except:
+            logging.warning('error sending goodbye to %s' % 
+                    str(self.client_address))
+
+
+class Soul():
+    """The soul of the connection, takes the request object from a
+    connection, which connects to the user.
+    """
+    def __init__(self, handler):
+        self.handler = handler
+        self.request = handler.request
+
         self.cmd_history = []
         self.bad_count = 0
         self.parse = True
         # StringIO will be better choice for buffer.
         self.buffer = ''
 
-    def handle(self):
-        soul = self.soul
+    # communcation
+    def recv(self):
+        data = self.request.recv(MAX_CMD_LEN)
+        return data
+
+    def send(self, msg):
         try:
-            while 1:
-                # data larger than this is broken into separate part
-                data = self.request.recv(MAX_CMD_LEN)
+            self.request.send(msg)
+        except:
+            logging.warning('cannot send message to %s' % self)
+            logging.warning('message was\n%s' % msg)
+
+    def loop(self):
+        while True:
+            try:
+                data = self.recv()
                 if not data:
                     return
-                print '%s data: (%d)' % (self.client_address, len(data))
+                logging.debug('%s data: (%d)' %
+                        (str(self.handler.client_address), len(data)))
                 # handle command parsing here
                 # parse(data)
                 if self.parse:
@@ -45,73 +122,75 @@ class MudRequestHandler(SocketServer.BaseRequestHandler):
                     cmd = data.strip()
                     self.cmd_history.append(cmd)
                     if cmd:
-                        print '%s cmd: %s' % (self.client_address, cmd)
+                        logging.debug('%s cmd: %s' % 
+                                (str(self.handler.client_address), cmd))
                     # TODO - command lookup table here
                     if cmd == 'view':
-                        msg = 'souls = %s\n' % str(souls)
-                        soul.send(msg)
+                        msg = 'souls = %s\n' % str(self)
+                        self.send(msg)
                     if cmd == 'history':
                         msg = 'history = %d\n' % len(self.cmd_history)
-                        soul.send(msg)
+                        self.send(msg)
                     elif cmd == 'except':
                         raise
                     elif cmd == 'bye':
-                        return
+                        return True
                     else:
-                        soul.send(data)
+                        self.send('You sent: %s' % data)
                 else:
-                    print 'Last chunk too long, scanning for next newline'
+                    logging.debug('Last chunk too long, scanning for next newline')
                     self.bad_count += 1
-                # if data did end with newline, parse
+
                 if self.bad_count > MAX_BAD:
-                    print 'bad_count maxxed out, dropping connection'
+                    logging.debug('bad_count maxxed out, dropping connection')
                     return
+
+                # if data did end with newline, parse
                 self.parse = (data[-1] == '\n')
+                print self.parse
+            except:
+                logging.warning('%s got an exception!' % str(self))
+                logging.warning(traceback.format_exc())
+                self.send('A serious error has occured!\n')
 
-        except:
-            print self.client_address, 'got an exception!'
-            return
-
-    def finish(self):
-        print self.client_address, 'disconnected.'
+    def handle(self):
         try:
-            soul = self.soul
-            souls.remove(soul)
-            soul.send('bye ' + str(self.client_address) + '\n')
+            self.loop()
         except:
-            print 'error sending goodbye'
+            # wow, something messed up bad.
+            logging.warning('%s exception has leaked out of loop!' % str(self))
+            logging.warning(traceback.format_exc())
+            self.send('A critical error has occured!\nYou have been disconnected!\n')
 
+    # support
+    def greeting(self):
+        logging.debug('created soul %s' % self)
+        self.send('hi %s\n' % str(self.handler.client_address))
 
-class Soul():
-    def __init__(self, request):
-        self.request = request
-        print "creating soul %s" % self
-
-    def recv(self):
-        pass
-
-    def send(self, msg):
-        self.request.send(msg)
+    def quit(self):
+        self.send('bye %s\n' % str(self.handler.client_address))
 
 def start():
     server = None
     try:
         print "Starting server...",
-        server = ThreadingMUDServer((HOST, PORT), MudRequestHandler)
+        server = ThreadingMudServer((HOST, PORT), MudRequestHandler)
         print "done."
+    except socket.error:
+        print "fail!"
+        raise
+
+    try:
         while 1:
             server.handle_request()
     except KeyboardInterrupt:
         print "Got Keyboard Interrupt."
-    except socket.error:
-        print "fail!"
-        raise
     finally:
         if server:
             try:
                 print "Server shutting down."
-                for v in souls:
-                    v.send('Server shutting down.\n')
+                for soul in souls:
+                    soul.send('Server shutting down.\n')
             finally:
                 server.server_close()
         else:
