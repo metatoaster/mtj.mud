@@ -14,9 +14,18 @@ HOST = ''
 PORT = 50000
 MAX_CMD_LEN = 1024
 MAX_BAD = 10
+CMD_TERM = ['\r', '\n']
+CHAR_TERM = '\r'
+
+LOGIN_PROMPT = '\xff\xfc\x01Login: '
+PASSWORD_PROMPT = '\xff\xfb\x01Password: '
+STD_PROMPT = '> '
 
 # list of souls (or connections)
 souls = []
+
+# list of valid commands need to be placed somewhere else better
+valid_cmd = ['say', 'yell',]
 
 
 class MudThread:
@@ -85,6 +94,77 @@ class MudRequestHandler(SocketServer.BaseRequestHandler):
                     str(self.client_address))
 
 
+class MudObject(object):
+    # FIXME - use kwargs, etc. for constructor
+    def __init__(self, description=''):
+        self.description = description
+
+
+class MudRoom(MudObject):
+    def __init__(self, description=''):
+        # generic mudroom
+        MudObject.__init__(self, description)
+        self.cmds = {'look': self.look}  # dictionary of special commands
+
+    # XXX - need better name for generic activate room method
+    def enter(self):
+        # show description
+        return self.description
+
+    def look(self):
+        return self.description
+
+    def processCmd(self, cmd):
+        # special commands
+        return self.cmds[cmd]()
+
+    def valid_cmds(self, cmd):
+        return cmd in self.cmds
+
+
+class LoginRoom(MudRoom):  # should also inherit from special subclass
+
+    def __init__(self, soul):
+        MudObject.__init__(self, 'Welcome to the MUD.\r\n')
+        self.soul = soul
+        self.login = None
+        self.password = None
+        self.valid_cmds = lambda x:True
+
+    def enter(self, soul):
+        # XXX - why do we want a soul here?
+        result = ''.join([self.description, LOGIN_PROMPT])
+        return result
+
+    def processCmd(self, cmd):
+        # these sends directly to souls here are probably bad practice
+        if cmd:
+            if not self.login:
+                self.login = cmd
+                # XXX - lol hacks and raw sends
+                self.soul.request.send(PASSWORD_PROMPT)
+            elif not self.password:
+                self.password = cmd
+        if self.login and self.password:
+            # do login
+            self.soul.send('')
+            self.soul.send('You logged in as %s/%s' % (self.login, self.password))
+            self.soul.send('Logins do not work now, so just exist as a soul without a body.')
+            self.soul.send(STD_PROMPT, False)
+            # manual move...
+            self.soul.room = Rooms['main']
+        return True
+
+
+# this basically creates an instance?
+SpecialObject = {
+    'Login': LoginRoom,
+}
+
+Rooms = {
+    'main': MudRoom('An empty room.'),
+}
+
 class Soul():
     """The soul of the connection, takes the request object from a
     connection, which connects to the user.
@@ -95,34 +175,88 @@ class Soul():
 
         self.cmd_history = []
         self.bad_count = 0
-        self.parse = True
-        # StringIO will be better choice for buffer.
-        self.buffer = ''
+        self.online = None
+
+        self.rawq = []
+
+        # the bodies
+        self.body = None
+        self.room = SpecialObject['Login'](self)
 
     # communication
     def recv(self):
-        data = self.request.recv(MAX_CMD_LEN)
-        return data
+        # TODO - this can be made more efficient
+        validChar = lambda x: 32 <= ord(x) <= 126
+        data = ''
+        rawq = self.rawq
+        while self.online:
+            data = self.request.recv(32)
+            logging.log(0, 'received data (%02d|%s)' % 
+                    (len(data), data.__repr__()))
+            if not data:
+                self.online = False
+            if data: # and validChar(data):
+                rawq.append(data)
+            if CHAR_TERM in data:
+                # XXX I am tired
+                break
 
-    def send(self, msg):
+        # do error validation here.
+        # else:
+        #     logging.debug('Last chunk too long, scanning for next newline')
+        #     self.bad_count += 1
+        # if self.bad_count > MAX_BAD:
+        #     logging.debug('bad_count maxxed out, dropping connection')
+        #     return
+
+        # fresh queue after we grabbed output
+        raw = ''.join(rawq)
+        rawq = []
+
+        lines = []  # all the good lines
+        line = []   # current line (chars)
+        for c in raw:
+            if validChar(c):
+                line.append(c)
+            if c in CMD_TERM:
+                if line:
+                    lines.append(''.join(line))
+                    line = []
+        if line:
+            # append leftovers for next round...
+            rawq.append(''.join(line))
+        self.rawq = rawq
+        logging.debug('got lines: %s' % str(lines))
+
+        return lines
+
+    def send(self, msg, newline=True):
         try:
-            self.request.send(msg)
+            logging.debug('sending msg: %s' % msg.__repr__())
+            # XXX - maybe abstract these telnet codes away, or use the
+            # telnet class?
+            self.request.send('\xff\xfb\x01%s' % msg)
+            if newline:
+                self.request.send('\r\n')
+            # reset of some sort for a new line
+            self.request.send('\xff\xfc\x01')
         except:
             logging.warning('cannot send message to %s' % self)
-            logging.warning('message was\n%s' % msg)
+            logging.warning('message was: %s' % msg.__repr__())
 
     def loop(self):
-        while True:
+        if self.online == None:
+            self.online = True
+            self.send(self.room.enter(self), False)
+
+        while self.online:
             try:
-                data = self.recv()
-                if not data:
-                    return
-                logging.debug('%s data: (%d)' %
-                        (str(self.handler.client_address), len(data)))
-                # handle command parsing here
-                # parse(data)
-                if self.parse:
+                lines = self.recv()
+                logging.debug('%s command count = (%d)' %
+                        (str(self.handler.client_address), len(lines)))
+                for data in lines:
                     logging.debug('processing data')
+                    # handle command parsing here
                     self.bad_count = 0
                     cmd = data.strip()
                     self.cmd_history.append(cmd)
@@ -130,33 +264,24 @@ class Soul():
                         logging.debug('%s cmd: %s' % 
                                 (str(self.handler.client_address), cmd))
                     # TODO - command lookup table here
-                    if cmd == 'view':
-                        msg = 'souls = %s\n' % str(self)
-                        self.send(msg)
-                    if cmd == 'history':
-                        msg = 'history = %d\n' % len(self.cmd_history)
-                        self.send(msg)
-                    elif cmd == 'except':
-                        raise
-                    elif cmd == 'bye':
-                        return True
-                    else:
-                        self.send('You sent: %s' % data)
-                else:
-                    logging.debug('Last chunk too long, scanning for next newline')
-                    self.bad_count += 1
-
-                if self.bad_count > MAX_BAD:
-                    logging.debug('bad_count maxxed out, dropping connection')
-                    return
-
-                # if data did end with newline, parse
-                #self.parse = (data[-1] == '\n')
-                logging.debug('parsing is %s' % str(self.parse))
+                    self.processCmd(cmd)
+                    #if cmd == 'view':
+                    #    msg = 'souls = %s' % str(self)
+                    #    self.send(msg)
+                    #if cmd == 'history':
+                    #    msg = 'history = %d' % len(self.cmd_history)
+                    #    self.send(msg)
+                    #elif cmd == 'except':
+                    #    raise Exception('user triggered exception')
+                    #elif cmd == 'bye':
+                    #    return True
+                    #else:
+                    #    self.send('You sent: %s' % data)
             except:
                 logging.warning('%s got an exception!' % str(self))
                 logging.warning(traceback.format_exc())
-                self.send('A serious error has occured!\n')
+                self.send('A serious error has occured!')
+        logging.debug('%s is offline, terminating connection.' % str(self))
 
     def handle(self):
         try:
@@ -165,15 +290,38 @@ class Soul():
             # wow, something messed up bad.
             logging.warning('%s exception has leaked out of loop!' % str(self))
             logging.warning(traceback.format_exc())
-            self.send('A critical error has occured!\nYou have been disconnected!\n')
+            self.send('A critical error has occured!')
+            self.send('You have been disconnected!')
+
+    # commands
+    def processCmd(self, cmd, trail=''):
+        if cmd in valid_cmd:
+            self.send('Valid command was sent')
+            self.send(STD_PROMPT, False)
+        #elif cmd in self.room.cmds:
+        elif self.room.valid_cmds(cmd):
+            # bad code is bad
+            s = self.room.processCmd(cmd)
+            logging.debug('room cmd: %s' % cmd)
+            logging.debug('room result: %s' % s)
+            if type(s) is str:
+                self.send(s)
+                self.send(STD_PROMPT, False)
+        else:
+            #self.send('You sent: %s' % data)
+            self.send('"%s" is not valid command' % cmd)
+            self.send(STD_PROMPT, False)
 
     # support
     def greeting(self):
         logging.debug('created soul %s' % self)
-        self.send('hi %s\n' % str(self.handler.client_address))
+        self.send('hi %s' % str(self.handler.client_address))
 
     def quit(self):
-        self.send('bye %s\n' % str(self.handler.client_address))
+        self.online = False
+        self.send('bye %s' % str(self.handler.client_address))
+
+
 
 def start():
     server = None
@@ -185,6 +333,7 @@ def start():
         print "fail!"
         raise
 
+    # XXX - split this part off?
     try:
         while 1:
             server.handle_request()
@@ -195,7 +344,7 @@ def start():
             try:
                 print "Server shutting down."
                 for soul in souls:
-                    soul.send('Server shutting down.\n')
+                    soul.send('Server shutting down.')
             finally:
                 server.server_close()
         else:
