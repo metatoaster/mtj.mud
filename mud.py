@@ -25,7 +25,10 @@ STD_PROMPT = '> '
 souls = []
 
 # list of valid commands need to be placed somewhere else better
-valid_cmd = ['say', 'yell',]
+valid_cmd = {
+    'say': lambda: False,
+    'yell': lambda: False,
+}
 
 
 class MudThread:
@@ -87,11 +90,6 @@ class MudRequestHandler(SocketServer.BaseRequestHandler):
             souls.remove(soul)
         logging.debug('%s disconnecting' % 
                 str(self.client_address))
-        try:
-            soul.quit()
-        except:
-            logging.warning('error sending goodbye to %s' % 
-                    str(self.client_address))
 
 
 class MudObject(object):
@@ -149,7 +147,8 @@ class LoginRoom(MudRoom):  # should also inherit from special subclass
             # do login
             self.soul.send('')
             self.soul.send('You logged in as %s/%s' % (self.login, self.password))
-            self.soul.send('Logins do not work now, so just exist as a soul without a body.')
+            self.soul.send('Logins do not work now, so just exist as a soul without a real body.')
+            self.soul.body = self.login
             self.soul.send(STD_PROMPT, False)
             # manual move...
             self.soul.room = Rooms['main']
@@ -182,6 +181,10 @@ class Soul():
         # the bodies
         self.body = None
         self.room = SpecialObject['Login'](self)
+        # no () at the end so not to call it now
+        self.valid_cmd = {
+            'quit': self.quit,
+        }
 
     # communication
     def recv(self):
@@ -296,8 +299,14 @@ class Soul():
     # commands
     def processCmd(self, cmd, trail=''):
         if cmd in valid_cmd:
-            self.send('Valid command was sent')
+            self.send('Valid global command was sent')
+            valid_cmd[cmd]()
             self.send(STD_PROMPT, False)
+        elif cmd in self.valid_cmd:
+            self.send('Valid soul command was sent')
+            self.valid_cmd[cmd]()
+            # Prompt handling *will* need fixing
+            #self.send(STD_PROMPT, False)
         #elif cmd in self.room.cmds:
         elif self.room.valid_cmds(cmd):
             # bad code is bad
@@ -319,7 +328,7 @@ class Soul():
 
     def quit(self):
         self.online = False
-        self.send('bye %s' % str(self.handler.client_address))
+        self.send('Goodbye %s, see you soon.' % str(self.body))
 
 
 
