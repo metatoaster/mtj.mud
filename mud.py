@@ -1,3 +1,7 @@
+# mtmud.mud - A Basic Mud library in Python
+# Copyright (c) 2007 Tommy Yu
+# This software is released under the GPLv3
+
 import sys
 import socket
 import SocketServer
@@ -95,7 +99,7 @@ class Soul():
         # StringIO will be better choice for buffer.
         self.buffer = ''
 
-    # communcation
+    # communication
     def recv(self):
         data = self.request.recv(MAX_CMD_LEN)
         return data
@@ -118,6 +122,7 @@ class Soul():
                 # handle command parsing here
                 # parse(data)
                 if self.parse:
+                    logging.debug('processing data')
                     self.bad_count = 0
                     cmd = data.strip()
                     self.cmd_history.append(cmd)
@@ -146,8 +151,8 @@ class Soul():
                     return
 
                 # if data did end with newline, parse
-                self.parse = (data[-1] == '\n')
-                print self.parse
+                #self.parse = (data[-1] == '\n')
+                logging.debug('parsing is %s' % str(self.parse))
             except:
                 logging.warning('%s got an exception!' % str(self))
                 logging.warning(traceback.format_exc())
