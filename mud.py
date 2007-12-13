@@ -168,7 +168,7 @@ class LoginRoom(MudRoom):  # should also inherit from special subclass
             self.soul.send('You logged in as %s/%s' % (self.login, self.password))
             self.soul.send('Logins do not work now, so just exist as a soul without a real body.')
             self.soul.body = self.login
-            self.soul.send(STD_PROMPT, False)
+            self.soul.prompt()
             # manual move...
             self.soul.room = Rooms['main']
         return True
@@ -209,6 +209,7 @@ class Soul():
     def recv(self):
         # TODO - this can be made more efficient
         validChar = lambda x: 32 <= ord(x) <= 126
+        ctrlChar = lambda x: ord(x) >= 240 or ord(x) < 32
         data = ''
         rawq = self.rawq
         while self.online and CHAR_TERM not in data:
@@ -230,13 +231,30 @@ class Soul():
 
         # fresh queue after we grabbed output
         raw = ''.join(rawq)
+        logging.debug('Received raw data: %s', raw.__repr__())
         rawq = []
+
+        # FIXME - put this in better place
+        # look for telnet nvt codes and handle them.
+        iac = '\xff\xfd\x06'
+        iac_c = 0
 
         lines = []  # all the good lines
         line = []   # current line (chars)
         for c in raw:
             if validChar(c):
                 line.append(c)
+            if ctrlChar(c):
+                # XXX hack for ctrl-c handling sent from telnet
+                if iac[iac_c] == c:
+                    iac_c += 1
+                else:
+                    iac_c = 0
+
+                if iac_c == 3:
+                    logging.debug('acting on iac')
+                    iac_c = 0
+                    self.request.send('\xff\xfb\x06')
             if c in CMD_TERM:
                 if line:
                     lines.append(''.join(line))
@@ -323,12 +341,12 @@ class Soul():
         if cmd in valid_cmd:
             self.send('Valid global command was sent')
             valid_cmd[cmd]()
-            self.send(STD_PROMPT, False)
+            self.prompt()
         elif cmd in self.valid_cmd:
             self.send('Valid soul command was sent')
             self.valid_cmd[cmd]()
             # Prompt handling *will* need fixing
-            #self.send(STD_PROMPT, False)
+            #self.prompt()
         #elif cmd in self.room.cmds:
         elif self.room.valid_cmds(cmd):
             # bad code is bad
@@ -337,13 +355,17 @@ class Soul():
             logging.debug('room result: %s' % s)
             if type(s) is str:
                 self.send(s)
-                self.send(STD_PROMPT, False)
+                self.prompt()
         else:
             #self.send('You sent: %s' % data)
             self.send('"%s" is not valid command' % cmd)
-            self.send(STD_PROMPT, False)
+            self.prompt()
 
     # support
+    def prompt(self):
+        self.request.send('\xff\xfd\x01')
+        self.request.send(STD_PROMPT)
+
     def greeting(self):
         logging.debug('created soul %s' % self)
         self.send('hi %s' % str(self.handler.client_address))
@@ -463,8 +485,14 @@ if __name__ == '__main__':
             active = False
             print ''
         except KeyboardInterrupt:
-            print('\nGot keyboard interrupt, terminating.')
-            active = False
+            print('\nGot keyboard interrupt.'),
+            if mudserv.isRunning():
+                print('mudserv running, stopping...'),
+                mudserv.stop()
+                print 'done.'
+            else:
+                print('mudserv not running, terminating.')
+                active = False
         except:
             print traceback.format_exc()
     # stop server if running
