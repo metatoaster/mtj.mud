@@ -10,7 +10,7 @@ import traceback
 import threading
 
 # workaround for locked sockets
-socket.setdefaulttimeout(0.5)
+#socket.setdefaulttimeout(3)
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -25,9 +25,6 @@ CHAR_TERM = '\r'
 LOGIN_PROMPT = '\xff\xfc\x01Login: '
 PASSWORD_PROMPT = '\xff\xfb\x01Password: '
 STD_PROMPT = '> '
-
-# list of souls (or connections)
-souls = []
 
 # list of valid commands need to be placed somewhere else better
 valid_cmd = {
@@ -76,7 +73,18 @@ class ThreadingMudServer(MudConnThread, SocketServer.TCPServer):
     """Standard ThreadingTCPServer, extended to allow customization.
     """
     allow_reuse_address = True
-    pass
+
+    def server_activate(self):
+        SocketServer.TCPServer.server_activate(self)
+        self.active = True
+        self.souls = []
+
+    def server_close(self):
+        SocketServer.TCPServer.server_close(self)
+        self.active = False
+        for soul in self.souls:
+            soul.send('Server shutting down.')
+            soul.quit()
 
 
 class MudRequestHandler(SocketServer.BaseRequestHandler):
@@ -89,18 +97,18 @@ class MudRequestHandler(SocketServer.BaseRequestHandler):
         logging.debug('%s connected' % str(self.client_address))
         soul = Soul(self)
         self.soul = soul
-        souls.append(soul)
+        self.server.souls.append(soul)
 
     def handle(self):
-        self.soul.handle()
+        if self.server.active:
+            self.soul.handle()
 
     def finish(self):
         soul = self.soul
-        if soul in souls:
+        if soul in self.server.souls:
             # bye
-            souls.remove(soul)
-        logging.debug('%s disconnecting' % 
-                str(self.client_address))
+            self.server.souls.remove(soul)
+        logging.debug('%s disconnecting' % str(self.client_address))
 
 
 class MudObject(object):
@@ -288,6 +296,9 @@ class Soul():
                     #    return True
                     #else:
                     #    self.send('You sent: %s' % data)
+            # uncomment below if using socket.setdefaulttimeout
+            #except socket.timeout:
+            #    pass
             except:
                 logging.warning('%s got an exception!' % str(self))
                 logging.warning(traceback.format_exc())
@@ -342,45 +353,47 @@ class Soul():
         self.send('Goodbye %s, see you soon.' % str(self.body))
 
 
-class MudServer():
+class MudServerController():
 
     def __init__(self):
         """Initalizes the server, set constants from config file, etc.
         
         Does nothing for now.
         """
-        self.running = None
+        self._running = None
         self.server = None
-        self.souls = []
         self.t = None
+        self.listenAddr = (HOST, PORT)  # redefine from somewhere?
 
     def _begin(self):
+        if self._running:
+            logging.warn('Server %s already started.' % self.server)
+            return
         try:
             logging.info('Starting server...')
-            self.server = ThreadingMudServer((HOST, PORT), MudRequestHandler)
-            self.running = True
-            logging.info('Started server %s', self)
+            self.server = ThreadingMudServer(self.listenAddr, MudRequestHandler)
+            self._running = True
+            logging.info('Started server %s', self.server)
         except socket.error:
-            logging.warn('Failed to start server %s', self)
+            logging.warn('Failed to start server %s', self.server)
             raise
 
     def _run(self):
-        while self.running:
+        while self._running:
             self.server.handle_request()
 
     def _end(self):
-        if self.server and self.running:
-            try:
-                logging.info('Shutting down server %s.', self)
-                # FIXME - deal with threads?!
-                for soul in self.souls:
-                    soul.send('Server shutting down.')
-            finally:
-                self.server.server_close()
-                self.running = False
+        if self.server and self._running:
+            logging.info('Shutting down server %s.', self.server)
+            self.server.server_close()
+            self._running = False
+            # XXX - used to kill the listening connection
+            socket.socket(
+                    socket.AF_INET,
+                    socket.SOCK_STREAM
+                ).connect(self.listenAddr)
         else:
-            raise
-        #sys.exit()
+            logging.debug('No running server to stop.')
 
     def _start(self):
         # XXX - this is not a real start function, stuck in loop is
@@ -389,7 +402,8 @@ class MudServer():
         try:
             self._run()
         finally:
-            self._end()
+            if self._running:
+                self._end()
 
     def start(self):
         """Start a new thread to process the request."""
@@ -403,19 +417,21 @@ class MudServer():
         self.t.join(5)
         self.t.isAlive()
 
+    def isRunning(self):
+        return self._running
+
 
 if __name__ == '__main__':
     def start():
-        if not mudserv.running:
-            print 'Starting mudserv... ',
+        if not mudserv.isRunning():
+            print 'Starting mudserv thread.'
             mudserv.start()
-            print 'done.'
         else:
             print 'mudserv already started.'
 
     def stop():
-        if mudserv.running:
-            print 'Stopping mudserv... ',
+        if mudserv.isRunning():
+            print 'Stopping mudserv...',
             mudserv.stop()
             print 'done.'
         else:
@@ -425,12 +441,13 @@ if __name__ == '__main__':
         # lolhack
         raise EOFError
 
-    mudserv = MudServer()
+    mudserv = MudServerController()
     active = True
-    server_cmd = {
+    root_server_cmd = {
          'start': start,
          'stop': stop,
          'quit': quit,
+         '': str,  # lolhack
     }
 
     print 'Starting mtmud interactive shell.'
@@ -438,8 +455,8 @@ if __name__ == '__main__':
         try:
             print('mudctrl>'),
             s = raw_input()
-            if s in server_cmd:
-                server_cmd[s]()
+            if s in root_server_cmd:
+                root_server_cmd[s]()
             else:
                 print 'Invalid Command.'
         except EOFError:
@@ -451,6 +468,9 @@ if __name__ == '__main__':
         except:
             print traceback.format_exc()
     # stop server if running
-    if mudserv.running:
+    if mudserv.isRunning():
         mudserv.stop()
+
+    # really quit.
+    sys.exit()
 
