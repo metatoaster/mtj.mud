@@ -4,18 +4,16 @@
 
 import sys
 import socket
-import SocketServer
+from SocketServer import TCPServer, BaseRequestHandler
 import logging
 import traceback
 import threading
-
-# workaround for locked sockets
-#socket.setdefaulttimeout(3)
 
 logging.basicConfig(level=logging.DEBUG)
 
 HOST = ''
 PORT = 50000
+LISTEN_TIMEOUT = 1  # seconds
 MAX_DATA_LEN = 512
 MAX_CMD_LEN = 1024
 MAX_BAD = 10
@@ -41,11 +39,10 @@ class MudDriver:
 
 
 class MudConnThread:
-    """Mix-in class to handle each request in a new thread."""
+    """Based on ThreadingMixIn of the SocketServer module.
+    """
 
-    # Decides how threads will act upon termination of the
-    # main process
-    daemon_threads = True
+    # XXX - is joining the threads on shutdown required?
 
     def process_request_thread(self, request, client_address):
         """Same as in BaseServer but as a thread.
@@ -64,30 +61,39 @@ class MudConnThread:
         """Start a new thread to process the request."""
         t = threading.Thread(target = self.process_request_thread,
                              args = (request, client_address))
-        if self.daemon_threads:
-            t.setDaemon (1)
+        t.setDaemon(1)
         t.start()
 
 
-class ThreadingMudServer(MudConnThread, SocketServer.TCPServer):
+class ThreadingMudServer(MudConnThread, TCPServer):
     """Standard ThreadingTCPServer, extended to allow customization.
     """
     allow_reuse_address = True
 
+    def get_request(self):
+        """Get the request and client address from the socket.
+
+        Don't want to be stuck listening forever.
+
+        """
+
+        self.socket.settimeout(LISTEN_TIMEOUT)
+        return self.socket.accept()
+
     def server_activate(self):
-        SocketServer.TCPServer.server_activate(self)
+        TCPServer.server_activate(self)
         self.active = True
         self.souls = []
 
     def server_close(self):
-        SocketServer.TCPServer.server_close(self)
+        TCPServer.server_close(self)
         self.active = False
         for soul in self.souls:
             soul.send('Server shutting down.')
             soul.quit()
 
 
-class MudRequestHandler(SocketServer.BaseRequestHandler):
+class MudRequestHandler(BaseRequestHandler):
     """Mud request handler
 
     Basically sets up a soul object and pass the request controls to
@@ -314,9 +320,6 @@ class Soul():
                     #    return True
                     #else:
                     #    self.send('You sent: %s' % data)
-            # uncomment below if using socket.setdefaulttimeout
-            #except socket.timeout:
-            #    pass
             except:
                 logging.warning('%s got an exception!' % str(self))
                 logging.warning(traceback.format_exc())
@@ -409,11 +412,6 @@ class MudServerController():
             logging.info('Shutting down server %s.', self.server)
             self.server.server_close()
             self._running = False
-            # XXX - used to kill the listening connection
-            socket.socket(
-                    socket.AF_INET,
-                    socket.SOCK_STREAM
-                ).connect(self.listenAddr)
         else:
             logging.debug('No running server to stop.')
 
