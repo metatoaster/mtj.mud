@@ -34,11 +34,14 @@ name) and password.
 
 Login: """.replace('\n', '\r\n')  # lol?
 
-# list of valid commands need to be placed somewhere else better
-valid_cmd = {
-    'say': lambda: False,
-    'yell': lambda: False,
-}
+DEFAULT_ROOM_DESC = """\
+This is the default room description for a newly created room if no
+description is passed in the construction parameter.  Although this is 
+a very bland and featureless room, all the functions found in normal
+rooms can be utilized, so feel free to look around, even though you may
+find nothing of importance aside from other objects that may be sitting
+around in this room.
+""".replace('\n', '\r\n')  # lol?
 
 
 class MudDriver:
@@ -160,54 +163,143 @@ class MudRequestHandler(BaseRequestHandler):
 
 class MudObject(object):
     # FIXME - use kwargs, etc. for constructor
-    def __init__(self, description=''):
+    def __init__(self, title='MudObject', description=''):
+        # XXX - consider using __str__ and family for title and desc?
+        # FIXME - use kargs
+        self.title = title
         self.description = description
         self.cmds = {}
-        self.objects = []  # XXX - call this better?
+        self.contents = []  # XXX - call this better?
+        self.parent = None  # XXX - can we make this more... dynamic?
 
     def process_cmd(self, cmd):
-        return self.cmds[cmd]()
+        # XXX - should checks like these be required?
+        #if not self.valid_cmd(cmd):
+        #    return None
+        s = self.cmds[cmd[0]](cmd)
+        logging.debug('%s.process_cmd: %s = %s' % (self, cmd, s))
+        return s
 
     def valid_cmd(self, cmd):
-        return cmd in self.cmds
+        return cmd[0] in self.cmds
+
+    def send(self, msg):
+        pass
+
+    def add(self, obj):
+        # assume contents to be list
+        # obj.parent = self  # XXX - ??? consequences?
+        # XXX - order may not look "correct", but it is probably right
+        #   because of not needing to message the same object twice as
+        #   object enters list.
+        self.msg_contents('%s enters.' % obj)
+        obj.send('You enter %s' % self)
+        self.contents.append(obj)
+
+    def remove(self, obj):
+        if obj in self.contents: 
+            self.contents.remove(obj)
+        obj.send('You have left %s' % self)
+        self.msg_contents('%s leaves.' % obj)
+
+    def msg_contents(self, msg, omit=[], objs=None):
+        if objs:
+            O = objs
+        else:
+            O = self.contents
+        for o in O:
+            if o not in omit:
+                o.send(msg)
 
 
 class MudSprite(MudObject):
     """Anything that is somewhat smart?"""
-    def __init__(self, description='', soul=''):
+    def __init__(self, title='MudSprite', description='', soul=''):
         MudObject.__init__(self, description)
 
 
 class MudPlayer(MudSprite):
-    def __init__(self, description='', soul=''):
+    def __init__(self, description='', name='Guest', soul=''):
         MudSprite.__init__(self, description)
         self.soul = soul  # this a list so it can be posessed?
+        self.name = name
+        self.title = self.name
         self._other_souls = [] # XXX - ???
+        self.cmds = {
+            'look': self.look,
+            'say': self.say,
+        }  # dictionary of special commands
+
+        # contents...
         self.room = None
+        self.inventory = self.contents
 
     def process_cmd(self, cmd):
-        if cmd in self.cmds:
-            return self.cmds[cmd]()
-        # XXX - this really necessary?
-        #elif self.soul and self.soul.valid_cmd(cmd)
-        #    return self.soul.process_cmd(cmd)
+        logging.debug('body cmd: %s' % cmd)
+        if cmd[0] in self.cmds:
+            s = self.cmds[cmd[0]](cmd)
+            logging.debug('body result: %s' % s)
+            return s
         elif self.room and self.room.valid_cmd(cmd):
             return self.room.process_cmd(cmd)
 
+    def look(self, cmd):
+        if self.room:
+            if hasattr(self.room, 'look'):
+                return self.room.look(cmd)
+            else:
+                logging.warning('%s in %s has no look()' % (self, self.room))
+                return "You are somewhere but for some reason you can't look!"
+        else:
+            return "You are not in a room!"
+
+    def say(self, cmd):
+        # XXX - should probably use a proper command type
+        if len(cmd) <= 1:
+            return "Talking to yourself is a sign of impending mental collapse."
+        msg = cmd[1]
+        if self.room:
+            self.send('You say, "%s"' % msg)
+            self.room.msg_contents('%s says, "%s"' % (self.name, msg),
+                    omit=[self])
+            return True
+        else:
+            return "You are not in a room!"
+
+    def send(self, msg):
+        self.soul.send(msg)
+
 
 class MudRoom(MudObject):
-    def __init__(self, description=''):
+    def __init__(self, title='Untitled Room', description=''):
         # generic mudroom
-        MudObject.__init__(self, description)
+        MudObject.__init__(self, description=description)
+        self.title = title
         self.cmds = {'look': self.look}  # dictionary of special commands
 
-    # XXX - need better name for generic activate room method
-    def enter(self):
-        # show description
-        return self.description
+    def look(self, cmd):
+        """Look command.  Example output might be something like:
 
-    def look(self):
-        return self.description
+        Empty Room
+
+        This is a very empty room.
+                There are no obvious exits.
+
+         Player
+         Guest
+         Somebody
+
+        """
+        template = '%s\r\n\r\n%s\r\n' % (self.title, self.description)
+        template += '        There are no obvious exits.\r\n\r\n'
+        # XXX - one can see oneself in the room
+        for o in self.contents:
+            template += ' %s\r\n' % o.title
+        return template
+
+    def add(self, obj):
+        obj.room = self
+        return MudObject.add(self, obj)
 
 
 class LoginRoom(MudRoom):
@@ -227,6 +319,9 @@ class LoginRoom(MudRoom):
 
     def process_cmd(self, cmd):
         # these sends directly to souls here are probably bad practice
+        if type(cmd) is list:
+            # XXX - like no error checking...
+            cmd = cmd[0]
         if cmd:
             if not self.login:
                 self.login = cmd
@@ -240,11 +335,14 @@ class LoginRoom(MudRoom):
             self.soul.send('You logged in as %s/%s' % (self.login, self.password))
             self.soul.send('Logins do not work now, so just exist as a soul without a real body.')
             # XXX - load the body the user originally created.
-            self.soul.body = MudPlayer(soul=self.soul)
+            body = MudPlayer(name=self.login, soul=self.soul)
+            self.soul.body = body
             # FIXME - this should NOT be here?!
             self.soul.prompt()
-            # manual move...
-            #self.soul.room = Rooms['main']
+            # FIXME - um, use the queue to move player into room?
+            room = Rooms['main']
+            room.add(body)
+            #self.soul.body.room = MudObject()
         return True
 
 
@@ -254,10 +352,10 @@ SpecialObject = {
 }
 
 Rooms = {
-    'main': MudRoom('An empty room.'),
+    'main': MudRoom('Empty Room', DEFAULT_ROOM_DESC),
 }
 
-class Soul():
+class Soul(MudObject):
     """The soul of the connection, takes the request object from a
     connection, which connects to the user.
     """
@@ -278,7 +376,7 @@ class Soul():
         # the bodies
         self.body = SpecialObject['Login'](self)
         # no () at the end so not to call it now
-        self.valid_cmd = {
+        self.cmds = {
             'quit': self.quit,
         }
 
@@ -351,7 +449,9 @@ class Soul():
             # telnet class?
             self.request.send('\xff\xfb\x01%s' % msg)
             if newline:
-                self.request.send('\r\n')
+                # don't send dup newlines
+                if msg[-2:] != '\r\n':
+                    self.request.send('\r\n')
             # reset of some sort for a new line
             self.request.send('\xff\xfc\x01')
         except:
@@ -377,7 +477,7 @@ class Soul():
                     if cmd:
                         logging.debug('%s cmd: %s' % 
                                 (str(self.handler.client_address), cmd))
-                    self.process_cmd(cmd)
+                    s = self.process_cmd(cmd)
             except:
                 logging.warning('%s got an exception!' % str(self))
                 logging.warning(traceback.format_exc())
@@ -399,28 +499,21 @@ class Soul():
 
     # commands
     def process_cmd(self, cmd, trail=''):
-        if cmd in valid_cmd:
-            self.send('Valid global command was sent')
-            valid_cmd[cmd]()
-            self.prompt()
-        elif cmd in self.valid_cmd:
+        # XXX - process_cmd is overridden here...
+        cmd = cmd.split(' ', 1)
+        if self.valid_cmd(cmd):
             self.send('Valid soul command was sent')
-            self.valid_cmd[cmd]()
+            return self.cmds[cmd[0]](cmd)
             # Prompt handling *will* need fixing
             #self.prompt()
-        #elif cmd in self.room.cmds:
-        elif self.body.valid_cmd(cmd):
-            # bad code is bad
-            s = self.body.process_cmd(cmd)
-            logging.debug('body cmd: %s' % cmd)
-            logging.debug('body result: %s' % s)
+        s = self.body.process_cmd(cmd)
+        if s:
             if type(s) is str:
                 self.send(s)
-                self.prompt()
         else:
-            #self.send('You sent: %s' % data)
-            self.send('"%s" is not valid command' % cmd)
-            self.prompt()
+            # FIXME - if valid command was entered but somehow not
+            # processed, this will be triggered and WILL be confusing
+            self.send('"%s" is invalid command' % cmd[0])
 
     # support
     def prompt(self):
@@ -431,9 +524,12 @@ class Soul():
         logging.debug('created soul %s' % self)
         self.send('hi %s' % str(self.handler.client_address))
 
-    def quit(self):
+    def quit(self, cmd):
+        # XXX - the list cmd sending requires cmd param...
         self.online = False
-        self.send('Goodbye %s, see you soon.' % str(self.body))
+        self.send('Goodbye %s, see you soon.' % str(self.body.name))
+        # FIXME - this need to add the body quit to the queue or body
+        # may receive item and item disappears along with deconstruct.
 
 
 class MudServerController():
