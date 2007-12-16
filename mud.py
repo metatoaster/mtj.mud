@@ -24,6 +24,16 @@ LOGIN_PROMPT = '\xff\xfc\x01Login: '
 PASSWORD_PROMPT = '\xff\xfb\x01Password: '
 STD_PROMPT = '> '
 
+GREETING = """\
+Welcome to the MUD!
+
+This playground is written in Python.  Everything is still very basic,
+if it even works at all.  No player profiles yet, but let's pretend
+they work for now.  Just type in anything for login (which will be your
+name) and password.
+
+Login: """.replace('\n', '\r\n')  # lol?
+
 # list of valid commands need to be placed somewhere else better
 valid_cmd = {
     'say': lambda: False,
@@ -36,6 +46,33 @@ class MudDriver:
     
     This is where main events should execute in.
     """
+
+
+class ChatChannel:
+    """Chat channel.
+    """
+    def __init__(self, name='chat'):
+        self.name = name
+        self.souls = set()  # maybe don't call them souls here?
+
+    def join(self, soul):
+        # XXX - type checking
+        # also existing check?
+        self.souls.add(soul)
+
+    def leave(self, soul):
+        """Leaves this chat channel."""
+        if soul in souls:
+            self.souls.remove(soul)
+            return True
+        else:
+            return False
+
+    def send(self, sender, msg):
+        # sanity checks here
+        for s in souls:
+            m = '%s [%s] %s' % (sender, self.name, msg)
+            s.send(m)
 
 
 class MudConnThread:
@@ -70,6 +107,15 @@ class ThreadingMudServer(MudConnThread, TCPServer):
     """
     allow_reuse_address = True
 
+    def __init__(self, server_address, RequestHandlerClass, controller):
+        """Constructor.  May be extended, do not override."""
+        TCPServer.__init__(self, server_address, RequestHandlerClass)
+        # XXX - controller = MudMaster?
+        self.controller = controller
+        self.active = True
+        self.souls = []
+        self.greeting_msg = GREETING
+
     def get_request(self):
         """Get the request and client address from the socket.
 
@@ -79,11 +125,6 @@ class ThreadingMudServer(MudConnThread, TCPServer):
 
         self.socket.settimeout(LISTEN_TIMEOUT)
         return self.socket.accept()
-
-    def server_activate(self):
-        TCPServer.server_activate(self)
-        self.active = True
-        self.souls = []
 
     def server_close(self):
         TCPServer.server_close(self)
@@ -121,6 +162,37 @@ class MudObject(object):
     # FIXME - use kwargs, etc. for constructor
     def __init__(self, description=''):
         self.description = description
+        self.cmds = {}
+        self.objects = []  # XXX - call this better?
+
+    def process_cmd(self, cmd):
+        return self.cmds[cmd]()
+
+    def valid_cmd(self, cmd):
+        return cmd in self.cmds
+
+
+class MudSprite(MudObject):
+    """Anything that is somewhat smart?"""
+    def __init__(self, description='', soul=''):
+        MudObject.__init__(self, description)
+
+
+class MudPlayer(MudSprite):
+    def __init__(self, description='', soul=''):
+        MudSprite.__init__(self, description)
+        self.soul = soul  # this a list so it can be posessed?
+        self._other_souls = [] # XXX - ???
+        self.room = None
+
+    def process_cmd(self, cmd):
+        if cmd in self.cmds:
+            return self.cmds[cmd]()
+        # XXX - this really necessary?
+        #elif self.soul and self.soul.valid_cmd(cmd)
+        #    return self.soul.process_cmd(cmd)
+        elif self.room and self.room.valid_cmd(cmd):
+            return self.room.process_cmd(cmd)
 
 
 class MudRoom(MudObject):
@@ -137,29 +209,23 @@ class MudRoom(MudObject):
     def look(self):
         return self.description
 
-    def processCmd(self, cmd):
-        # special commands
-        return self.cmds[cmd]()
 
-    def valid_cmds(self, cmd):
-        return cmd in self.cmds
-
-
-class LoginRoom(MudRoom):  # should also inherit from special subclass
+class LoginRoom(MudRoom):
+    # FIXME - should also inherit from special subclass
 
     def __init__(self, soul):
         MudObject.__init__(self, 'Welcome to the MUD.\r\n')
         self.soul = soul
         self.login = None
         self.password = None
-        self.valid_cmds = lambda x:True
+        self.valid_cmd = lambda x:True
 
     def enter(self, soul):
         # XXX - why do we want a soul here?
         result = ''.join([self.description, LOGIN_PROMPT])
         return result
 
-    def processCmd(self, cmd):
+    def process_cmd(self, cmd):
         # these sends directly to souls here are probably bad practice
         if cmd:
             if not self.login:
@@ -173,10 +239,12 @@ class LoginRoom(MudRoom):  # should also inherit from special subclass
             self.soul.send('')
             self.soul.send('You logged in as %s/%s' % (self.login, self.password))
             self.soul.send('Logins do not work now, so just exist as a soul without a real body.')
-            self.soul.body = self.login
+            # XXX - load the body the user originally created.
+            self.soul.body = MudPlayer(soul=self.soul)
+            # FIXME - this should NOT be here?!
             self.soul.prompt()
             # manual move...
-            self.soul.room = Rooms['main']
+            #self.soul.room = Rooms['main']
         return True
 
 
@@ -194,8 +262,12 @@ class Soul():
     connection, which connects to the user.
     """
     def __init__(self, handler):
+        # XXX - may not be too smart about giving a user control object
+        # all these references to resources above it?
         self.handler = handler
         self.request = handler.request
+        self.server = handler.server
+        self.controller = handler.server.controller
 
         self.cmd_history = []
         self.bad_count = 0
@@ -204,8 +276,7 @@ class Soul():
         self.rawq = []
 
         # the bodies
-        self.body = None
-        self.room = SpecialObject['Login'](self)
+        self.body = SpecialObject['Login'](self)
         # no () at the end so not to call it now
         self.valid_cmd = {
             'quit': self.quit,
@@ -290,7 +361,7 @@ class Soul():
     def loop(self):
         if self.online == None:
             self.online = True
-            self.send(self.room.enter(self), False)
+            self.send(self.server.greeting_msg, False)
 
         while self.online:
             try:
@@ -306,20 +377,7 @@ class Soul():
                     if cmd:
                         logging.debug('%s cmd: %s' % 
                                 (str(self.handler.client_address), cmd))
-                    # TODO - command lookup table here
-                    self.processCmd(cmd)
-                    #if cmd == 'view':
-                    #    msg = 'souls = %s' % str(self)
-                    #    self.send(msg)
-                    #if cmd == 'history':
-                    #    msg = 'history = %d' % len(self.cmd_history)
-                    #    self.send(msg)
-                    #elif cmd == 'except':
-                    #    raise Exception('user triggered exception')
-                    #elif cmd == 'bye':
-                    #    return True
-                    #else:
-                    #    self.send('You sent: %s' % data)
+                    self.process_cmd(cmd)
             except:
                 logging.warning('%s got an exception!' % str(self))
                 logging.warning(traceback.format_exc())
@@ -340,7 +398,7 @@ class Soul():
             self.send('You have been disconnected!')
 
     # commands
-    def processCmd(self, cmd, trail=''):
+    def process_cmd(self, cmd, trail=''):
         if cmd in valid_cmd:
             self.send('Valid global command was sent')
             valid_cmd[cmd]()
@@ -351,11 +409,11 @@ class Soul():
             # Prompt handling *will* need fixing
             #self.prompt()
         #elif cmd in self.room.cmds:
-        elif self.room.valid_cmds(cmd):
+        elif self.body.valid_cmd(cmd):
             # bad code is bad
-            s = self.room.processCmd(cmd)
-            logging.debug('room cmd: %s' % cmd)
-            logging.debug('room result: %s' % s)
+            s = self.body.process_cmd(cmd)
+            logging.debug('body cmd: %s' % cmd)
+            logging.debug('body result: %s' % s)
             if type(s) is str:
                 self.send(s)
                 self.prompt()
@@ -386,9 +444,13 @@ class MudServerController():
         Does nothing for now.
         """
         self._running = None
+        self.eventQ = []  # event queue is here?
         self.server = None
+        self.driver = None
+        self.chats = {}
         self.t = None
         self.listenAddr = (HOST, PORT)  # redefine from somewhere?
+        self._build_world()
 
     def _begin(self):
         if self._running:
@@ -396,7 +458,8 @@ class MudServerController():
             return
         try:
             logging.info('Starting server...')
-            self.server = ThreadingMudServer(self.listenAddr, MudRequestHandler)
+            self.server = ThreadingMudServer(
+                    self.listenAddr, MudRequestHandler, self)
             self._running = True
             logging.info('Started server %s', self.server)
         except socket.error:
@@ -416,14 +479,17 @@ class MudServerController():
             logging.debug('No running server to stop.')
 
     def _start(self):
-        # XXX - this is not a real start function, stuck in loop is
-        # still very stuck in loop.
+        # Do not call this directly.
         self._begin()
         try:
             self._run()
         finally:
             if self._running:
                 self._end()
+
+    def _build_world(self):
+        # builds the world
+        self.chats['global'] = ChatChannel()
 
     def start(self):
         """Start a new thread to process the request."""

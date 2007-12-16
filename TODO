@@ -1,0 +1,29 @@
+Exits
+=====
+- Two types
+- One that will be like a double link list
+- The other will be a one way
+- Two way will be like this:
+
+- Standard two way exit?
+Exit2
+  exit = [room1, room2] (invariant len(Exit2) == 2)
+  exit.enter(person, person.room(?)) (other params generalized?)
+    # enter the other room
+
+  both rooms will contain the relevant exits
+  room1.exits = {'south': exit, ...}
+  room2.exits = {'north': exit, ...}
+
+- One way exit
+Exit1
+  exit = room
+  exit.enter(person, person.room)
+
+
+Event queue
+===========
+
+This like reader/writer problem
+- each soul act as a reader (multiple readers)
+- the event processor is the writer
