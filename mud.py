@@ -11,7 +11,7 @@ import threading
 
 logging.basicConfig(level=logging.DEBUG)
 
-HOST = ''
+HOST = '0.0.0.0'
 PORT = 50000
 LISTEN_TIMEOUT = 1  # seconds
 MAX_DATA_LEN = 512
@@ -42,40 +42,6 @@ rooms can be utilized, so feel free to look around, even though you may
 find nothing of importance aside from other objects that may be sitting
 around in this room.
 """.replace('\n', '\r\n')  # lol?
-
-
-class MudDriver:
-    """The mud driver.
-    
-    This is where main events should execute in.
-    """
-
-
-class ChatChannel:
-    """Chat channel.
-    """
-    def __init__(self, name='chat'):
-        self.name = name
-        self.souls = set()  # maybe don't call them souls here?
-
-    def join(self, soul):
-        # XXX - type checking
-        # also existing check?
-        self.souls.add(soul)
-
-    def leave(self, soul):
-        """Leaves this chat channel."""
-        if soul in souls:
-            self.souls.remove(soul)
-            return True
-        else:
-            return False
-
-    def send(self, sender, msg):
-        # sanity checks here
-        for s in souls:
-            m = '%s [%s] %s' % (sender, self.name, msg)
-            s.send(m)
 
 
 class MudConnThread:
@@ -162,15 +128,35 @@ class MudRequestHandler(BaseRequestHandler):
 
 
 class MudObject(object):
-    # FIXME - use kwargs, etc. for constructor
-    def __init__(self, title='MudObject', description=''):
-        # XXX - consider using __str__ and family for title and desc?
-        # FIXME - use kargs
-        self.title = title
+    """\
+    The root object for the Mud.
+
+    All objects that exists within the world (or even ones that could
+    take advantage from inheriting this class) should inherit this.
+    """
+
+    def __init__(self, title=None, description=None, *args, **kwargs):
+        """\
+        Parameters:
+        title - Title (or short name) of the object.  Could have 
+            different meaning in subclasses.
+        description - Long description of the object.  Could have
+            different meaning in subclasses, but usually this meaning
+            will be used.
+        """
+        # XXX - make this chunk better?
+        if not title:
+            try:
+                s = self.__class__
+                self.title = s[s.index('.') + 1:]
+            except:
+                self.title = self.__repr__()
+        else:
+            self.title = title
         self.description = description
         self.cmds = {}
-        self.contents = []  # XXX - call this better?
-        self.parent = None  # XXX - can we make this more... dynamic?
+        self._children = []  # XXX - call this better?
+        self._parent = None  # XXX - can we make this more... dynamic?
 
     def process_cmd(self, cmd):
         # XXX - should checks like these be required?
@@ -192,21 +178,21 @@ class MudObject(object):
         # XXX - order may not look "correct", but it is probably right
         #   because of not needing to message the same object twice as
         #   object enters list.
-        self.msg_contents('%s enters.' % obj)
+        self.msg_children('%s enters.' % obj)
         obj.send('You enter %s' % self)
-        self.contents.append(obj)
+        self._children.append(obj)
 
     def remove(self, obj):
-        if obj in self.contents: 
-            self.contents.remove(obj)
+        if obj in self._children: 
+            self._children.remove(obj)
         obj.send('You have left %s' % self)
-        self.msg_contents('%s leaves.' % obj)
+        self.msg_children('%s leaves.' % obj)
 
-    def msg_contents(self, msg, omit=[], objs=None):
+    def msg_children(self, msg, omit=[], objs=None):
         if objs:
             O = objs
         else:
-            O = self.contents
+            O = self._children
         for o in O:
             if o not in omit:
                 o.send(msg)
@@ -214,25 +200,26 @@ class MudObject(object):
 
 class MudSprite(MudObject):
     """Anything that is somewhat smart?"""
-    def __init__(self, title='MudSprite', description='', soul=''):
-        MudObject.__init__(self, description)
+    def __init__(self, soul=None, *args, **kwargs):
+        self.soul = soul
+        MudObject.__init__(self, *args, **kwargs)
 
 
 class MudPlayer(MudSprite):
-    def __init__(self, description='', name='Guest', soul=''):
-        MudSprite.__init__(self, description)
-        self.soul = soul  # this a list so it can be posessed?
-        self.name = name
-        self.title = self.name
+    def __init__(self, name='Guest', *args, **kwargs):
+        MudSprite.__init__(self, *args, **kwargs)
         self._other_souls = [] # XXX - ???
+        self.name = name
+        self.title = ''  # titles are like 'Duke', 'Guildmaster'
         self.cmds = {
             'look': self.look,
             'say': self.say,
         }  # dictionary of special commands
 
         # contents...
-        self.room = None
-        self.inventory = self.contents
+        # FIXME - uh, better change this to attribute
+        self.room = lambda: self._parent
+        self.inventory = self._children
 
     def process_cmd(self, cmd):
         logging.debug('body cmd: %s' % cmd)
@@ -260,7 +247,7 @@ class MudPlayer(MudSprite):
         msg = cmd[1]
         if self.room:
             self.send('You say, "%s"' % msg)
-            self.room.msg_contents('%s says, "%s"' % (self.name, msg),
+            self.room.msg_children('%s says, "%s"' % (self.name, msg),
                     omit=[self])
             return True
         else:
@@ -271,10 +258,9 @@ class MudPlayer(MudSprite):
 
 
 class MudRoom(MudObject):
-    def __init__(self, title='Untitled Room', description=''):
+    def __init__(self, title='Empty Room', *args, **kwargs):
         # generic mudroom
-        MudObject.__init__(self, description=description)
-        self.title = title
+        MudObject.__init__(self, title=title, *args, **kwargs)
         self.cmds = {'look': self.look}  # dictionary of special commands
 
     def look(self, cmd):
@@ -291,9 +277,9 @@ class MudRoom(MudObject):
 
         """
         template = '%s\r\n\r\n%s\r\n' % (self.title, self.description)
-        template += '        There are no obvious exits.\r\n\r\n'
+        template += '        There are no obvious exits.\r\n'
         # XXX - one can see oneself in the room
-        for o in self.contents:
+        for o in self._children:
             template += ' %s\r\n' % o.title
         return template
 
@@ -302,11 +288,13 @@ class MudRoom(MudObject):
         return MudObject.add(self, obj)
 
 
-class LoginRoom(MudRoom):
+class SoulGateKeeper(MudObject):
     # FIXME - should also inherit from special subclass
 
-    def __init__(self, soul):
-        MudObject.__init__(self, 'Welcome to the MUD.\r\n')
+    def __init__(self, soul=None, *args, **kwargs):
+        # self.soul = self._parent
+        MudObject.__init__(self, *args, **kwargs)
+        self.description = 'Welcome to the MUD.\r\n'
         self.soul = soul
         self.login = None
         self.password = None
@@ -338,7 +326,7 @@ class LoginRoom(MudRoom):
             body = MudPlayer(name=self.login, soul=self.soul)
             self.soul.body = body
             # FIXME - this should NOT be here?!
-            self.soul.prompt()
+            #self.soul.prompt()
             # FIXME - um, use the queue to move player into room?
             room = Rooms['main']
             room.add(body)
@@ -348,24 +336,28 @@ class LoginRoom(MudRoom):
 
 # this basically creates an instance?
 SpecialObject = {
-    'Login': LoginRoom,
+    'Login': SoulGateKeeper,
 }
 
 Rooms = {
-    'main': MudRoom('Empty Room', DEFAULT_ROOM_DESC),
+    'main': MudRoom(title='Empty Room', description=DEFAULT_ROOM_DESC),
 }
 
 class Soul(MudObject):
     """The soul of the connection, takes the request object from a
     connection, which connects to the user.
     """
-    def __init__(self, handler):
+    def __init__(self, handler=None, *args, **kwargs):
         # XXX - may not be too smart about giving a user control object
         # all these references to resources above it?
+        # XXX - even though the handler isn't the root object, it must
+        # be used due to the scope of where this object was created.
+        MudObject.__init__(self, *args, **kwargs)
         self.handler = handler
         self.request = handler.request
         self.server = handler.server
         self.controller = handler.server.controller
+        self.driver = handler.server.controller.driver
 
         self.cmd_history = []
         self.bad_count = 0
@@ -374,7 +366,7 @@ class Soul(MudObject):
         self.rawq = []
 
         # the bodies
-        self.body = SpecialObject['Login'](self)
+        self.body = SoulGateKeeper(self)
         # no () at the end so not to call it now
         self.cmds = {
             'quit': self.quit,
@@ -388,13 +380,19 @@ class Soul(MudObject):
         data = ''
         rawq = self.rawq
         while self.online and CHAR_TERM not in data:
-            data = self.request.recv(MAX_DATA_LEN)
-            logging.log(0, 'received data (%02d|%s)' % 
-                    (len(data), data.__repr__()))
-            if not data:
+            try:
+                data = self.request.recv(MAX_DATA_LEN)
+                logging.log(0, 'received data (%02d|%s)' % 
+                        (len(data), data.__repr__()))
+                if not data:
+                    self.online = False
+                if data: # and validChar(data):
+                    rawq.append(data)
+            except:
+                # something real bad must have happened, forcing 
+                # offline to be safe
                 self.online = False
-            if data: # and validChar(data):
-                rawq.append(data)
+                raise
 
         # do error validation here.
         # else:
@@ -477,6 +475,7 @@ class Soul(MudObject):
                     if cmd:
                         logging.debug('%s cmd: %s' % 
                                 (str(self.handler.client_address), cmd))
+                    # send to queue
                     s = self.process_cmd(cmd)
             except:
                 logging.warning('%s got an exception!' % str(self))
@@ -532,10 +531,55 @@ class Soul(MudObject):
         # may receive item and item disappears along with deconstruct.
 
 
+class MudRunner(MudObject):
+    """\
+    Ancestor thread runner class.  Anything that needs to run for a
+    while in a different thread should inherit this.
+    """
+
+    def __init__(self, *args, **kwargs):
+        """\
+        Initialize some runner
+        """
+        MudObject.__init__(self, *args, **kwargs)
+        self._running = None
+        self.t = None  # the thread
+
+    def _begin(self):
+        """\
+        Redefine to set up what should be done.
+        """
+        pass
+
+    def _run(self):
+        """\
+        Redefine to set up what should be done.
+        """
+        pass
+
+    def _end(self):
+        """\
+        Redefine to set up what should be done.
+        """
+        pass
+
+    def _start(self):
+        """\
+        The dummy start method that is called by the actual start
+        method, which will run this method in a separate thread.
+        """
+        self._begin()
+        try:
+            self._run()
+        finally:
+            if self._running:
+                self._end()
+
+
 class MudServerController():
 
     def __init__(self):
-        """Initalizes the server, set constants from config file, etc.
+        """Initializes the server, set constants from config file, etc.
         
         Does nothing for now.
         """
@@ -569,23 +613,26 @@ class MudServerController():
     def _end(self):
         if self.server and self._running:
             logging.info('Shutting down server %s.', self.server)
-            self.server.server_close()
             self._running = False
+            self.server.server_close()
         else:
             logging.debug('No running server to stop.')
 
+    def _build_world(self):
+        # builds the world
+        self.chats['global'] = ChatChannel()
+
     def _start(self):
-        # Do not call this directly.
+        """\
+        The dummy start method that is called by the actual start
+        method, which will run this method in a separate thread.
+        """
         self._begin()
         try:
             self._run()
         finally:
             if self._running:
                 self._end()
-
-    def _build_world(self):
-        # builds the world
-        self.chats['global'] = ChatChannel()
 
     def start(self):
         """Start a new thread to process the request."""
@@ -601,6 +648,52 @@ class MudServerController():
 
     def isRunning(self):
         return self._running
+
+
+class MudDriver(MudObject):
+    """The mud driver.
+    
+    This is where main events should execute in.
+    """
+    def __init__(self):
+        self.world = []
+        self.eventQ = []
+        self.running = False
+        pass
+
+    def process_cmd(self, cmd):
+        pass
+    
+    def _run(self):
+        pass
+
+
+class ChatChannel(MudObject):
+    """Chat channel.
+    """
+    # FIXME - MudObject
+    def __init__(self, *args, **kwargs):
+        # change children to set()?
+        self.souls = set()  # maybe don't call them souls here?
+
+    def join(self, soul):
+        # XXX - type checking
+        # also existing check?
+        self.souls.add(soul)
+
+    def leave(self, soul):
+        """Leaves this chat channel."""
+        if soul in souls:
+            self.souls.remove(soul)
+            return True
+        else:
+            return False
+
+    def send(self, sender, msg):
+        # sanity checks here
+        for s in souls:
+            m = '%s [%s] %s' % (sender, self.name, msg)
+            s.send(m)
 
 
 if __name__ == '__main__':
