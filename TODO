@@ -57,3 +57,44 @@ Rooms
 =====
 A room factory will be nice to generate a bunch of rooms that have more
 or less same descriptions.
+
+
+Rough idea on action classes
+============================
+Just some rough methods of what should be done.  It will *not* look
+like this in final form.
+
+def drink(caller):
+    caller = 'You drink %s' % (self)
+    caller.target = None  # the can of beer "dies", so nothing
+    caller.siblings = '%s drinks %s' % (caller, self)
+    caller.parent = '%s drinks %s' % (caller, self)
+    caller.children = None  # other items in room/inventory do not care
+
+def give(caller, item, target):
+    caller = 'You give %s to %s' % (item, target)
+    caller.target = '%s gives %s to you' % (caller, item)
+    caller.siblings = '%s gives %s to %s' % (caller, item, target)
+    caller.parent = '%s gives %s to %s' % (caller, item, target)
+    caller.children = None
+
+def say(caller, msg):
+    caller = 'You say, "%s"' % (msg)
+    caller.target = None  # no target
+    caller.siblings = '%s says, "%s"' % (caller, msg)
+    caller.parent = '%s says, "%s"' % (caller, msg)
+    caller.children = None
+
+def moveself(caller, target):
+    # this is actually a two stage problem
+    caller = '%s' % (target.longdesc)
+    caller.target = None  # as the room doesn't really care, or
+    caller.target = "%s enters you." % (target)  # this is just strange
+    # old room
+    caller.siblings = '%s leaves %s' % (caller, target)
+    # new room
+    caller.siblings = '%s enters.' % (caller)
+    # old room, new room?>
+    caller.parent = None
+    caller.children = None  # children won't know parent moved
+

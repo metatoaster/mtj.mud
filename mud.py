@@ -4,10 +4,16 @@
 
 import sys
 import socket
+from collections import deque
 from SocketServer import TCPServer, BaseRequestHandler
 import logging
 import traceback
 import threading
+import time
+try:
+    import readline
+except:
+    pass
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -100,7 +106,7 @@ class ThreadingMudServer(MudConnThread, TCPServer):
         self.active = False
         for soul in self.souls:
             soul.send('Server shutting down.')
-            soul.quit()
+            soul.quit('')
 
 
 class MudRequestHandler(BaseRequestHandler):
@@ -135,36 +141,77 @@ class MudObject(object):
     take advantage from inheriting this class) should inherit this.
     """
 
-    def __init__(self, title=None, description=None, *args, **kwargs):
+    def __init__(self, shortdesc=None, longdesc=None, *args, **kwargs):
         """\
         Parameters:
-        title - Title (or short name) of the object.  Could have 
+        shortdesc - One line description of the object.  Could have 
             different meaning in subclasses.
-        description - Long description of the object.  Could have
+        longdesc - Multi-line description of the object.  Could have
             different meaning in subclasses, but usually this meaning
             will be used.
         """
-        # XXX - make this chunk better?
-        if not title:
-            try:
-                s = self.__class__
-                self.title = s[s.index('.') + 1:]
-            except:
-                self.title = self.__repr__()
-        else:
-            self.title = title
-        self.description = description
+        self.shortdesc = shortdesc if shortdesc else type(self).__name__
+        self.longdesc = longdesc
+
+        # commands for this object (should only used by self)
         self.cmds = {}
+        # commands usable by siblings
+        self.sibling_cmds = {}
+        # commands usable by parent
+        self.parent_cmds = {}
+        # commands usable by children
+        self.children_cmds = {}
+
         self._children = []  # XXX - call this better?
         self._parent = None  # XXX - can we make this more... dynamic?
 
-    def process_cmd(self, cmd):
+    def _parse_cmd(self, input):
+        x = input.split(' ', 1)
+        if len(x) > 1:
+            return x
+        else:
+            return input, ''
+
+    def process_cmd(self, input):
         # XXX - should checks like these be required?
         #if not self.valid_cmd(cmd):
         #    return None
-        s = self.cmds[cmd[0]](cmd)
-        logging.debug('%s.process_cmd: %s = %s' % (self, cmd, s))
-        return s
+        cmd, arg = self._parse_cmd(input)
+
+        # XXX - Not sure what command model/hierarchy to use
+        # This model is search for commands to act on
+        logging.debug('%s.process_cmd [%s, %s]' % (self, cmd, msg.__repr__()))
+        if cmd in self.cmds:
+            logging.debug('%s.process_cmd, cmd in self' % (self))
+            result = self.do_cmd(caller, cmd, arg)
+            #selfMsg, targetMsg, othersMsg = self.cmds[cmd](msg)
+        elif cmd in self._parent.cmds:
+            logging.debug('%s.process_cmd, cmd in parent %s' % 
+                    (self, self._parent))
+            result = self._parent.do_cmd(caller, cmd, arg)
+            #selfMsg, targetMsg, othersMsg = self._parent.cmds[cmd](msg)
+        else:
+            # search children
+            for child in self._children: 
+                if cmd in child.cmds:
+                    logging.debug('%s.process_cmd, cmd in children %s' %
+                            (self, child))
+                    result = child.do_cmd(caller, cmd, arg)
+                    #selfMsg, targetMsg, othersMsg = child.cmds[cmd](msg)
+                    break
+
+            # search siblings
+            # XXX child = sibling here
+            for child in self._parent._children: 
+                if cmd in child.cmds:
+                    logging.debug('%s.process_cmd, cmd in sibling %s' %
+                            (self, child))
+                    result = child.do_cmd(caller, cmd, arg)
+                    #selfMsg, targetMsg, othersMsg = child.cmds[cmd](msg)
+                    break
+
+        self.send(selfMsg)
+        #self.send
 
     def valid_cmd(self, cmd):
         return cmd[0] in self.cmds
@@ -198,6 +245,15 @@ class MudObject(object):
                 o.send(msg)
 
 
+class MudEvent(MudObject):
+    """\
+    Anything an event happens, this gets created.
+    """
+    def __init__(self, source=None, target=None, *args, **kwargs):
+        self._parent = source
+        self.target = target
+
+
 class MudSprite(MudObject):
     """Anything that is somewhat smart?"""
     def __init__(self, soul=None, *args, **kwargs):
@@ -208,7 +264,8 @@ class MudSprite(MudObject):
 class MudPlayer(MudSprite):
     def __init__(self, name='Guest', *args, **kwargs):
         MudSprite.__init__(self, *args, **kwargs)
-        self._other_souls = [] # XXX - ???
+        self._other_souls = []  # XXX - ???
+        self.shortdesc = name  # have to be regenerated on title change
         self.name = name
         self.title = ''  # titles are like 'Duke', 'Guildmaster'
         self.cmds = {
@@ -258,9 +315,9 @@ class MudPlayer(MudSprite):
 
 
 class MudRoom(MudObject):
-    def __init__(self, title='Empty Room', *args, **kwargs):
+    def __init__(self, shortdesc='Empty Room', *args, **kwargs):
         # generic mudroom
-        MudObject.__init__(self, title=title, *args, **kwargs)
+        MudObject.__init__(self, shortdesc=shortdesc, *args, **kwargs)
         self.cmds = {'look': self.look}  # dictionary of special commands
 
     def look(self, cmd):
@@ -276,11 +333,14 @@ class MudRoom(MudObject):
          Somebody
 
         """
-        template = '%s\r\n\r\n%s\r\n' % (self.title, self.description)
+        template = '%s\r\n\r\n%s\r\n' % (self.shortdesc, self.longdesc)
         template += '        There are no obvious exits.\r\n'
+        # lolhax
+        if self._children:
+            template += '\r\n'
         # XXX - one can see oneself in the room
         for o in self._children:
-            template += ' %s\r\n' % o.title
+            template += ' %s\r\n' % o.shortdesc
         return template
 
     def add(self, obj):
@@ -294,7 +354,7 @@ class SoulGateKeeper(MudObject):
     def __init__(self, soul=None, *args, **kwargs):
         # self.soul = self._parent
         MudObject.__init__(self, *args, **kwargs)
-        self.description = 'Welcome to the MUD.\r\n'
+        self.longdesc = 'Welcome to the MUD.\r\n'
         self.soul = soul
         self.login = None
         self.password = None
@@ -302,7 +362,7 @@ class SoulGateKeeper(MudObject):
 
     def enter(self, soul):
         # XXX - why do we want a soul here?
-        result = ''.join([self.description, LOGIN_PROMPT])
+        result = ''.join([self.longdesc, LOGIN_PROMPT])
         return result
 
     def process_cmd(self, cmd):
@@ -334,18 +394,12 @@ class SoulGateKeeper(MudObject):
         return True
 
 
-# this basically creates an instance?
-SpecialObject = {
-    'Login': SoulGateKeeper,
-}
-
-Rooms = {
-    'main': MudRoom(title='Empty Room', description=DEFAULT_ROOM_DESC),
-}
-
 class Soul(MudObject):
     """The soul of the connection, takes the request object from a
     connection, which connects to the user.
+
+    This object could inherit from MudRunner and replace what 
+    MudThread does.
     """
     def __init__(self, handler=None, *args, **kwargs):
         # XXX - may not be too smart about giving a user control object
@@ -475,8 +529,9 @@ class Soul(MudObject):
                     if cmd:
                         logging.debug('%s cmd: %s' % 
                                 (str(self.handler.client_address), cmd))
+                    #s = self.process_cmd(cmd)
                     # send to queue
-                    s = self.process_cmd(cmd)
+                    self.driver.Q(self, cmd)
             except:
                 logging.warning('%s got an exception!' % str(self))
                 logging.warning(traceback.format_exc())
@@ -542,7 +597,7 @@ class MudRunner(MudObject):
         Initialize some runner
         """
         MudObject.__init__(self, *args, **kwargs)
-        self._running = None
+        self._running = False
         self.t = None  # the thread
 
     def _begin(self):
@@ -551,7 +606,7 @@ class MudRunner(MudObject):
         """
         pass
 
-    def _run(self):
+    def _action(self):
         """\
         Redefine to set up what should be done.
         """
@@ -563,34 +618,65 @@ class MudRunner(MudObject):
         """
         pass
 
+    def _run(self):
+        while self._running:
+            self._action()
+
     def _start(self):
         """\
         The dummy start method that is called by the actual start
         method, which will run this method in a separate thread.
         """
         self._begin()
+        self._running = True
         try:
             self._run()
         finally:
             if self._running:
+                # FIXME - this does not call thread join
                 self._end()
 
+    def start(self):
+        """Spawns a new thread that will run the code defined in _run."""
+        self.t = threading.Thread(target = self._start)
+        self.t.start()
 
-class MudServerController():
+    def stop(self):
+        """Terminates server."""
+        try:
+            self._end()
+        except:
+            self._running = False
+            raise
+        # Join the thread
+        self._running = False
+        self.t.join(5)
+        self.t.isAlive()
 
-    def __init__(self):
-        """Initializes the server, set constants from config file, etc.
+    def isRunning(self):
+        return self._running
+
+
+class MudServerController(MudRunner):
+    """\
+    The server controller.
+
+    An instance of this class will spawn a server on a separate thread
+    that will listen on HOST:PORT once its start method is called.
+    """
+
+    def __init__(self, *args, **kwargs):
+        """\
+        Initializes the controller, set constants from config file, etc.
         
-        Does nothing for now.
+        Currently does nothing too important for now.
         """
-        self._running = None
-        self.eventQ = []  # event queue is here?
+        MudRunner.__init__(self, *args, **kwargs)
         self.server = None
         self.driver = None
         self.chats = {}
-        self.t = None
+        self.chats['global'] = ChatChannel()
         self.listenAddr = (HOST, PORT)  # redefine from somewhere?
-        self._build_world()
 
     def _begin(self):
         if self._running:
@@ -600,72 +686,68 @@ class MudServerController():
             logging.info('Starting server...')
             self.server = ThreadingMudServer(
                     self.listenAddr, MudRequestHandler, self)
-            self._running = True
             logging.info('Started server %s', self.server)
         except socket.error:
             logging.warn('Failed to start server %s', self.server)
             raise
 
-    def _run(self):
-        while self._running:
-            self.server.handle_request()
+    def _action(self):
+        self.server.handle_request()
 
     def _end(self):
         if self.server and self._running:
+            # XXX - needed here, server_close could toss exception
             logging.info('Shutting down server %s.', self.server)
-            self._running = False
             self.server.server_close()
         else:
             logging.debug('No running server to stop.')
 
+
+class MudDriver(MudRunner):
+    """\
+    The mud driver.
+    
+    This is what drives all actions in the mud, or where main events
+    spawned by objects of the world should execute in.
+    """
+    def __init__(self, *args, **kwargs):
+        MudRunner.__init__(self, *args, **kwargs)
+        self.world = []
+        self.cmdQ = deque()
+        self.timeout = 1 / 1000.
+        self._build_world()
+
+    def _begin(self):
+        pass
+
+    def _action(self):
+        while self.cmdQ:
+            # nobody else is popping this list, so when this is true
+            # there must be an item to pop.  No false positives either
+            # as append is atomic.
+            caller, cmd = self.cmdQ.popleft()
+            # FIXME
+            logging.debug('cmdQ -> %s: %s' % (caller, cmd))
+            caller.process_cmd(cmd)
+            # parse cmd
+        # all done, go sleep for a bit.
+        time.sleep(self.timeout)
+
+    def _end(self):
+        # save the world!
+        pass
+
     def _build_world(self):
         # builds the world
-        self.chats['global'] = ChatChannel()
+        pass
 
-    def _start(self):
+    def Q(self, caller, cmd):
         """\
-        The dummy start method that is called by the actual start
-        method, which will run this method in a separate thread.
+        Queue a command.  Commands are just strings.
         """
-        self._begin()
-        try:
-            self._run()
-        finally:
-            if self._running:
-                self._end()
-
-    def start(self):
-        """Start a new thread to process the request."""
-        self.t = threading.Thread(target = self._start)
-        self.t.start()
-
-    def stop(self):
-        """Terminates server."""
-        # need to join self.t?
-        self._end()
-        self.t.join(5)
-        self.t.isAlive()
-
-    def isRunning(self):
-        return self._running
-
-
-class MudDriver(MudObject):
-    """The mud driver.
-    
-    This is where main events should execute in.
-    """
-    def __init__(self):
-        self.world = []
-        self.eventQ = []
-        self.running = False
-        pass
-
-    def process_cmd(self, cmd):
-        pass
-    
-    def _run(self):
-        pass
+        logging.debug('cmdQ <- %s: %s' % (caller, cmd))
+        self.cmdQ.append((caller, cmd,))
+        # this is an atomic operation.
 
 
 class ChatChannel(MudObject):
@@ -696,6 +778,10 @@ class ChatChannel(MudObject):
             s.send(m)
 
 
+Rooms = {
+    'main': MudRoom(shortdesc='Empty Room', longdesc=DEFAULT_ROOM_DESC),
+}
+
 if __name__ == '__main__':
     def start():
         if not mudserv.isRunning():
@@ -712,30 +798,73 @@ if __name__ == '__main__':
         else:
             print 'mudserv not started.'
 
+    def drive():
+        if not driver.isRunning():
+            print 'Starting driver thread.'
+            driver.start()
+        else:
+            print 'driver already driving.'
+
+    def brake():
+        if driver.isRunning():
+            print 'Stopping driver...',
+            driver.stop()
+            print 'done.'
+        else:
+            print 'driver not driving.'
+
+    def debug():
+        # lolhack
+        global eval_mode
+        if not eval_mode:
+            print('Debug mode on.  Basic raw Python commands are now accepted.')
+            print('To return to standard mudctrl mode, type "debug()" again.')
+        eval_mode = not eval_mode
+        if not eval_mode:
+            return 'Debug mode off.'
+
     def quit():
         # lolhack
         raise EOFError
 
+    driver = MudDriver()
     mudserv = MudServerController()
+    mudserv.driver = driver
     active = True
+    eval_mode = False
+    prompts = {
+        True: '>>> ',
+        False: 'mudctrl> ',
+    }
     root_server_cmd = {
          'start': start,
          'stop': stop,
          'quit': quit,
+         'drive': drive,
+         'brake': brake,
+         'debug()': debug,
          '': str,  # lolhack
     }
 
     print 'Starting mtmud interactive shell.'
     while active:
         try:
-            print('mudctrl>'),
-            s = raw_input()
-            if s in root_server_cmd:
-                root_server_cmd[s]()
+            # XXX might want to use code.InteractiveConsole
+            _s = raw_input(prompts[eval_mode])
+            if eval_mode:
+                try:
+                    print eval(_s)
+                except:
+                    exec _s
+            elif _s in root_server_cmd:
+                root_server_cmd[_s]()
             else:
                 print 'Invalid Command.'
         except EOFError:
-            active = False
+            if eval_mode:
+                eval_mode = False
+            else:
+                active = False
             print ''
         except KeyboardInterrupt:
             print('\nGot keyboard interrupt.'),
@@ -751,6 +880,8 @@ if __name__ == '__main__':
     # stop server if running
     if mudserv.isRunning():
         mudserv.stop()
+    if driver.isRunning():
+        driver.stop()
 
     # really quit.
     sys.exit()
