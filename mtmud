@@ -58,7 +58,7 @@ if __name__ == '__main__':
         raise EOFError
 
     driver = MudDriver()
-    mudserv = MudServerController()
+    mudserv = MudServerController(host=HOST, port=PORT)
     mudserv.driver = driver
     active = True
     eval_mode = False
