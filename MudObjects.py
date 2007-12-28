@@ -170,7 +170,7 @@ class MudPlayer(MudSprite):
         self.name = name
         self.title = ''  # titles are like 'Duke', 'Guildmaster'
         self.cmds = {
-            'look': self.look,
+            'look': Look,
             'say': Say,
         }  # dictionary of special commands
 
@@ -190,30 +190,6 @@ class MudPlayer(MudSprite):
             result = self.shortdesc
         return result
 
-    def look(self, cmd):
-        if self.room:
-            if hasattr(self.room, 'look'):
-                return self.room.look(cmd)
-            else:
-                LOG.warning('%s in %s has no look()' % \
-                        (self.__repr__(), self._parent.__repr__()))
-                return "You are somewhere but for some reason you can't look!"
-        else:
-            return "You are not in a room!"
-
-    def say(self, cmd):
-        # XXX - should probably use a proper command type
-        if len(cmd) <= 1:
-            return "Talking to yourself is a sign of impending mental collapse."
-        msg = cmd[1]
-        if self.room:
-            self.send('You say, "%s"' % msg)
-            self.room.msg_children('%s says, "%s"' % (self.name, msg),
-                    omit=[self])
-            return True
-        else:
-            return "You are not in a room!"
-
     def send(self, msg):
         self.soul.send(msg)
 
@@ -222,32 +198,9 @@ class MudRoom(MudObject):
     def __init__(self, shortdesc='Empty Room', *args, **kwargs):
         # generic mudroom
         MudObject.__init__(self, shortdesc=shortdesc, *args, **kwargs)
-        self.cmds = {'look': self.look}  # dictionary of special commands
-
-    def look(self, cmd):
-        """Look command.  Example output might be something like:
-
-        Empty Room
-
-        This is a very empty room.
-                There are no obvious exits.
-
-         Player
-         Guest
-         Somebody
-
-        """
-        template = '%s\r\n\r\n%s\r\n' % (self.shortdesc, self.longdesc)
-        template += '        There are no obvious exits.\r\n'
-        # lolhax
-        if self._children:
-            template += '\r\n'
-        # XXX - one can see oneself in the room
-        for o in self._children:
-            template += ' %s\r\n' % o.shortdesc
-        return template
 
     def add(self, obj):
+        # XXX - fix this and use _parent
         obj.room = self
         return MudObject.add(self, obj)
 

@@ -154,3 +154,46 @@ class Say(MudAction):
             self.sibsMsg = '%s says, "%s"' % (self.caller, self.trail)
         else:
             self.callerMsg = 'Saying nothing is no good.'
+
+
+class Look(MudAction):
+    """\
+    Usage: look [<item>]
+
+    One of the most important commands you will ever use, look will
+    allow you to inspect your surroundings and items you specify that
+    are in your surroundings or your inventory.
+    
+    Status: Under development.  Items do not work.
+    """
+
+    def __init__(self, trail, caller, target=None, second=None, caller_sibs=None):
+        # cheat to build the list of caller_sibs... this will need
+        # to be fixed for more versatility
+        MudAction.__init__(self, trail, caller, target, second, caller_sibs=True)
+
+    _look_sample = """\
+        Example output might be something like:
+
+        Empty Room
+
+        This is a very empty room.
+                There are no obvious exits.
+
+         Player
+         Guest
+         Somebody
+
+        """
+
+    def setResponse(self): #, caller, target, others, caller_sibs):
+        room = self.caller._parent
+        if room:
+            template = '%s\r\n\r\n%s\r\n' % (room.shortdesc, room.longdesc)
+            template += '        There are no obvious exits.\r\n\r\n'
+            for sib in self.caller_sibs:
+                template += ' %s\r\n' % sib
+            self.callerMsg = template
+        else:
+            self.callerMsg = "You are not in a room!"
+
