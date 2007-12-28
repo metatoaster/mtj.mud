@@ -5,6 +5,8 @@
 # Interactive controller for mtmud
 
 from mud import *
+from server import *
+from runner import *
 try:
     import readline
 except:
