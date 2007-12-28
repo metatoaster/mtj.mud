@@ -158,8 +158,19 @@ class MudObject(object):
         # commands usable by children
         self.children_cmds = {}
 
+        # attributes will be used by players (and mobs) to determine
+        # their strengths, agility, or basically statistics of them.
+        # rooms could have temperature and water level attributes.
+        # rooms may have to somehow automatically extend whatever
+        # attributes exported by the area they belong to
+        self.attributes = {}
+
         self._children = []  # XXX - call this better?
         self._parent = None  # XXX - can we make this more... dynamic?
+        self._hb = None  # heartbeat
+
+    def __str__(self):
+        return self.shortdesc
 
     def _parse_cmd(self, input):
         x = input.split(' ', 1)
@@ -176,41 +187,59 @@ class MudObject(object):
 
         # XXX - Not sure what command model/hierarchy to use
         # This model is search for commands to act on
-        logging.debug('%s.process_cmd [%s, %s]' % (self, cmd, msg.__repr__()))
-        if cmd in self.cmds:
-            logging.debug('%s.process_cmd, cmd in self' % (self))
-            result = self.do_cmd(caller, cmd, arg)
+        logging.debug('%s.process_cmd [%s, %s]' % \
+                (self.__repr__(), cmd.__repr__(), arg.__repr__()))
+        if self.valid_cmd(cmd):
+            logging.debug('%s.process_cmd, cmd in self' % (self.__repr__()))
+            result = self.do_cmd(self, cmd, arg)
             #selfMsg, targetMsg, othersMsg = self.cmds[cmd](msg)
-        elif cmd in self._parent.cmds:
+        elif self._parent and self._parent.valid_cmd(cmd):
             logging.debug('%s.process_cmd, cmd in parent %s' % 
-                    (self, self._parent))
-            result = self._parent.do_cmd(caller, cmd, arg)
+                    (self.__repr__(), self._parent.__repr__()))
+            result = self._parent.do_cmd(self, cmd, arg)
             #selfMsg, targetMsg, othersMsg = self._parent.cmds[cmd](msg)
         else:
             # search children
             for child in self._children: 
-                if cmd in child.cmds:
+                if child.valid_cmd(cmd):
                     logging.debug('%s.process_cmd, cmd in children %s' %
-                            (self, child))
-                    result = child.do_cmd(caller, cmd, arg)
+                            (self.__repr__(), child.__repr__()))
+                    result = child.do_cmd(self, cmd, arg)
                     #selfMsg, targetMsg, othersMsg = child.cmds[cmd](msg)
                     break
 
             # search siblings
             # XXX child = sibling here
-            for child in self._parent._children: 
-                if cmd in child.cmds:
+            siblings = []
+            if self._parent:
+                siblings = self._parent._children
+            for child in siblings:
+                if child.valid_cmd(cmd):
                     logging.debug('%s.process_cmd, cmd in sibling %s' %
-                            (self, child))
-                    result = child.do_cmd(caller, cmd, arg)
+                            (self.__repr__(), child.__repr__()))
+                    result = child.do_cmd(self, cmd, arg)
                     #selfMsg, targetMsg, othersMsg = child.cmds[cmd](msg)
                     break
 
-        self.send(selfMsg)
-        #self.send
-
     def valid_cmd(self, cmd):
-        return cmd[0] in self.cmds
+        return cmd in self.cmds
+
+    def do_cmd(self, caller, cmd, arg):
+        # FIXME - this is NOT what I designed.
+        logging.debug('%s.do_cmd(%s, %s, %s)' % \
+                (self.__repr__(), 
+                    caller.__repr__(), 
+                    cmd.__repr__(), 
+                    arg.__repr__()
+                ))
+        aC = self.cmds[cmd]
+        if type(aC).__name__ == 'classobj' and issubclass(aC, MudAction):
+            # FIXME get support of the other variables into here.
+            # (self, trail, caller, target, second, caller_sibs):
+            a = aC(arg, self)
+            a.call()
+        else:
+            aC(arg)
 
     def send(self, msg):
         pass
@@ -221,6 +250,7 @@ class MudObject(object):
         # XXX - order may not look "correct", but it is probably right
         #   because of not needing to message the same object twice as
         #   object enters list.
+        # FIXME - should NOT do messaging here, use MudAction
         self.msg_children('%s enters.' % obj)
         obj.send('You enter %s' % self)
         self._children.append(obj)
@@ -228,6 +258,8 @@ class MudObject(object):
     def remove(self, obj):
         if obj in self._children: 
             self._children.remove(obj)
+        # else FIXME put warning
+        # FIXME - should NOT do messaging here, use MudAction
         obj.send('You have left %s' % self)
         self.msg_children('%s leaves.' % obj)
 
@@ -250,6 +282,147 @@ class MudEvent(MudObject):
         self.target = target
 
 
+class MudAction():
+    """\
+    Ancestor class to encapsulate an action.
+    """
+    def __init__(self, trail, caller, target=None, second=None, caller_sibs=None):
+        """\
+        Parameters:
+        trail - the trailing text of the command that was sent.
+            * this may be redefined to require the parse tuple to be
+              sent.
+        caller - the object that created this action
+        target - the target object
+        second - the secondary selected target
+        caller_sibs - specific list of caller siblings to message to.
+            if True the siblings will be assumed to be children of the
+            parent of the caller, if caller has parent.
+            if a list of objects is specified, it's assumed they are
+            chosen siblings of caller.
+            else no siblings will be notified.
+        """
+        self.trail = trail
+        self.caller = caller
+        self.target = target
+        self.second = second
+        self.caller_sibs = []
+        if caller_sibs is True:
+            if caller._parent:
+                self.caller_sibs.extend(caller._parent._children)
+                # XXX remove caller and target(s) like so, sane?
+                if caller in self.caller_sibs: self.caller_sibs.remove(caller)
+                if target in self.caller_sibs: self.caller_sibs.remove(target)
+                if second in self.caller_sibs: self.caller_sibs.remove(second)
+        elif type(caller_sibs) is list:
+            self.caller_sibs = caller_sibs
+
+        # default outputs
+        self.callerMsg = None
+        self.targetMsg = None
+        self.secondMsg = None
+        self.sibsMsg = None
+
+        self.setResponse()
+
+    def call(self):
+        """\
+        Call this method to commit the action.
+
+        This may be converted into a metaclass?
+        """
+        self.action()
+        self._send()
+
+    def _send(self):
+        """\
+        This method sends the output to each targets.
+        """
+        if self.caller and self.callerMsg:
+            self.caller.send(self.callerMsg)
+        if self.target and self.targetMsg:
+            self.target.send(self.targetMsg)
+        if self.second and self.secondMsg:
+            self.second.send(self.secondMsg)
+        if self.sibsMsg:
+            for cs in self.caller_sibs:
+                cs.send(self.sibsMsg)
+
+
+    def setResponse(self): #, caller, target, others, caller_sibs):
+        """\
+        Redefine this method to set the output response for the 
+        selected caller and targets.
+        """
+
+    def action(self):
+        """\
+        Redefine this method to process other actions that may need to
+        happen before any output is sent.
+        """
+
+
+class MudActionDefault(MudAction):
+    """\
+    An Example MudAction class.
+    """
+
+    def setResponse(self): #, caller, target, others, caller_sibs):
+        """\
+        Redefine this method to set the output response for the 
+        selected caller and targets.
+        """
+        self.callerMsg = 'You do MudAction with %s on %s' % \
+                (self.second, self.target)
+        self.targetMsg = '%s does MudAction with %s on you' % \
+                (self.caller, self.second)
+        self.secondMsg = '%s does MudAction with you on %s' % \
+                (self.caller, self.target)
+        self.sibsMsg = '%s does MudAction with %s on %s' % \
+                (self.caller, self.second, self.target)
+
+
+class Say(MudAction):
+    """\
+    Usage: say <message>
+
+    The say command sends <message> to everyone listening within the
+    current room.
+    """
+
+    def __init__(self, trail, caller, target=None, second=None, caller_sibs=None):
+        MudAction.__init__(self, trail, caller, target, second, caller_sibs=True)
+
+    def setResponse(self): #, caller, target, others, caller_sibs):
+        if self.trail:
+            self.callerMsg = 'You say, "%s"' % (self.trail)
+            self.sibsMsg = '%s says, "%s"' % (self.caller, self.trail)
+        else:
+            self.callerMsg = 'Saying nothing is no good.'
+
+
+class MudActionMulti():
+    """\
+    Action class that accepts multiple selected targets.
+
+    This is currently a placeholder class.
+    """
+    def __init__(self, caller, target=None, others=None, caller_sibs=None):
+        """\
+        Parameters:
+        caller - the object that created this action
+        target - the target object
+        others - a list of secondary targetted object
+        caller_sibs - specific list of caller siblings to message to.
+            if True the siblings will be assumed to be children of the
+            parent of the caller, if caller has parent.
+            if a list of objects is specified, it's assumed they are
+            chosen siblings of caller.
+            else no siblings will be notified.
+        """
+        pass
+
+
 class MudSprite(MudObject):
     """Anything that is somewhat smart?"""
     def __init__(self, soul=None, *args, **kwargs):
@@ -266,7 +439,7 @@ class MudPlayer(MudSprite):
         self.title = ''  # titles are like 'Duke', 'Guildmaster'
         self.cmds = {
             'look': self.look,
-            'say': self.say,
+            'say': Say,
         }  # dictionary of special commands
 
         # contents...
@@ -274,21 +447,23 @@ class MudPlayer(MudSprite):
         self.room = lambda: self._parent
         self.inventory = self._children
 
-    def process_cmd(self, cmd):
-        logging.debug('body cmd: %s' % cmd)
-        if cmd[0] in self.cmds:
-            s = self.cmds[cmd[0]](cmd)
-            logging.debug('body result: %s' % s)
-            return s
-        elif self.room and self.room.valid_cmd(cmd):
-            return self.room.process_cmd(cmd)
+    def __str__(self):
+        if '%s' in self.title:
+            try:
+                result = self.title % self.shortdesc
+            except:
+                # XXX warn?
+                result = self.shortdesc
+        else:
+            result = self.shortdesc
+        return result
 
     def look(self, cmd):
         if self.room:
             if hasattr(self.room, 'look'):
                 return self.room.look(cmd)
             else:
-                logging.warning('%s in %s has no look()' % (self, self.room))
+                logging.warning('%s in %s has no look()' % (self.__repr__(), self._parent.__repr__()))
                 return "You are somewhere but for some reason you can't look!"
         else:
             return "You are not in a room!"
@@ -353,15 +528,19 @@ class SoulGateKeeper(MudObject):
         self.longdesc = 'Welcome to the MUD.\r\n'
         self.soul = soul
         self.login = None
+        self.name = 'Unknown'  # XXX - workaround
         self.password = None
-        self.valid_cmd = lambda x:True
 
     def enter(self, soul):
         # XXX - why do we want a soul here?
         result = ''.join([self.longdesc, LOGIN_PROMPT])
         return result
 
-    def process_cmd(self, cmd):
+    def valid_cmd(self, cmd):
+        return True
+
+    def do_cmd(self, caller, cmd, arg):
+        # XXX - this should be do_cmd
         # these sends directly to souls here are probably bad practice
         if type(cmd) is list:
             # XXX - like no error checking...
@@ -380,12 +559,13 @@ class SoulGateKeeper(MudObject):
             self.soul.send('Logins do not work now, so just exist as a soul without a real body.')
             # XXX - load the body the user originally created.
             body = MudPlayer(name=self.login, soul=self.soul)
-            self.soul.body = body
+            self.soul._parent = body
             # FIXME - this should NOT be here?!
             #self.soul.prompt()
             # FIXME - um, use the queue to move player into room?
             room = Rooms['main']
             room.add(body)
+            body._parent = room
             #self.soul.body.room = MudObject()
         return True
 
@@ -397,6 +577,13 @@ class Soul(MudObject):
     This object could inherit from MudRunner and replace what 
     MudThread does.
     """
+    # XXX fix this abuse
+    def set_body(self, body): self._parent = body
+    body = property(
+        fget=lambda self: self._parent,
+        fset=set_body,
+    )
+
     def __init__(self, handler=None, *args, **kwargs):
         # XXX - may not be too smart about giving a user control object
         # all these references to resources above it?
@@ -416,7 +603,7 @@ class Soul(MudObject):
         self.rawq = []
 
         # the bodies
-        self.body = SoulGateKeeper(self)
+        self._parent = SoulGateKeeper(soul=self)
         # no () at the end so not to call it now
         self.cmds = {
             'quit': self.quit,
@@ -498,12 +685,12 @@ class Soul(MudObject):
             self.request.send('\xff\xfb\x01%s' % msg)
             if newline:
                 # don't send dup newlines
-                if msg[-2:] != '\r\n':
+                if msg.__str__()[-2:] != '\r\n':
                     self.request.send('\r\n')
             # reset of some sort for a new line
             self.request.send('\xff\xfc\x01')
         except:
-            logging.warning('cannot send message to %s' % self)
+            logging.warning('cannot send message to %s' % self.__repr__())
             logging.warning('message was: %s' % msg.__repr__())
 
     def loop(self):
@@ -524,14 +711,14 @@ class Soul(MudObject):
                     self.cmd_history.append(cmd)
                     if cmd:
                         logging.debug('%s cmd: %s' % 
-                                (str(self.handler.client_address), cmd))
-                    #s = self.process_cmd(cmd)
+                                (str(self.handler.client_address), 
+                                 cmd.__repr__()))
                     # send to queue
                     self.driver.Q(self, cmd)
             except:
-                logging.warning('%s got an exception!' % str(self))
+                logging.warning('%s got an exception!' % (self.__repr__()))
                 logging.warning(traceback.format_exc())
-                self.send('A serious error has occured!')
+                self.send('A serious error has occurred!')
         logging.debug('%s is offline, terminating connection.' % str(self))
 
     def handle(self):
@@ -542,28 +729,11 @@ class Soul(MudObject):
             # currently the login process is _outside_ the exception
             # block, so if login craps out this will definitely be
             # thrown.
-            logging.warning('%s exception has leaked out of loop!' % str(self))
+            logging.warning('%s exception has leaked out of loop!' % \
+                    (self.__repr__()))
             logging.warning(traceback.format_exc())
             self.send('A critical error has occured!')
             self.send('You have been disconnected!')
-
-    # commands
-    def process_cmd(self, cmd, trail=''):
-        # XXX - process_cmd is overridden here...
-        cmd = cmd.split(' ', 1)
-        if self.valid_cmd(cmd):
-            self.send('Valid soul command was sent')
-            return self.cmds[cmd[0]](cmd)
-            # Prompt handling *will* need fixing
-            #self.prompt()
-        s = self.body.process_cmd(cmd)
-        if s:
-            if type(s) is str:
-                self.send(s)
-        else:
-            # FIXME - if valid command was entered but somehow not
-            # processed, this will be triggered and WILL be confusing
-            self.send('"%s" is invalid command' % cmd[0])
 
     # support
     def prompt(self):
@@ -723,8 +893,15 @@ class MudDriver(MudRunner):
             # as append is atomic.
             caller, cmd = self.cmdQ.popleft()
             # FIXME
-            logging.debug('cmdQ -> %s: %s' % (caller, cmd))
-            caller.process_cmd(cmd)
+            logging.debug('cmdQ -> %s: %s' % (caller.__repr__(), cmd))
+            try:
+                caller.process_cmd(cmd)
+            except:
+                logging.warning(
+                    "%s got an exception: command '%s' from %s" %\
+                    (self.__repr__(), cmd.__repr__(), caller.__repr__()))
+                logging.warning(traceback.format_exc())
+                caller.send('A serious error has occurred!')
             # parse cmd
         # all done, go sleep for a bit.
         time.sleep(self.timeout)
@@ -741,7 +918,7 @@ class MudDriver(MudRunner):
         """\
         Queue a command.  Commands are just strings.
         """
-        logging.debug('cmdQ <- %s: %s' % (caller, cmd))
+        logging.debug('cmdQ <- %s: %s' % (caller.__repr__(), cmd))
         self.cmdQ.append((caller, cmd,))
         # this is an atomic operation.
 

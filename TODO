@@ -59,6 +59,25 @@ A room factory will be nice to generate a bunch of rooms that have more
 or less same descriptions.
 
 
+Factory
+=======
+A factory to construct items could be useful.  Common items such as
+potions, standard weapons or armor does not require multiple instances
+as they are basically clones - all we need is a reference.  
+
+This may not be an issue, but it will be a problem if for some reason 
+something needs to find the parent (owner) of the potion.  However if
+the question was, I see your potion I will steal your reference, it
+won't be.  Maybe have a way for such objects to create a proper clone
+of itself when such a case arrise.
+
+The factory could have a dictionary of standard initiated objects with
+the key the uninstanced class, the value an instance.  When someone
+wants an object it just pass the class to the factory, and factory will
+return reference to the instance, or instantiate a news instance of the
+class (and returns it).
+
+
 Rough idea on action classes
 ============================
 Just some rough methods of what should be done.  It will *not* look
