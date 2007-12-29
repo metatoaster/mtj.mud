@@ -62,6 +62,11 @@ class MudObject(object):
             return input, ''
 
     def process_cmd(self, input):
+        """\
+        This method will process the input and find the command to
+        execute by the owner of this method, which will then call
+        do_cmd.
+        """
         # XXX - should checks like these be required?
         #if not self.valid_cmd(cmd):
         #    return None
@@ -71,15 +76,14 @@ class MudObject(object):
         # This model is search for commands to act on
         LOG.debug('%s.process_cmd [%s, %s]' % \
                 (self.__repr__(), cmd.__repr__(), arg.__repr__()))
+        result = None
         if self.valid_cmd(cmd):
             LOG.debug('%s.process_cmd, cmd in self' % (self.__repr__()))
             result = self.do_cmd(self, cmd, arg)
-            #selfMsg, targetMsg, othersMsg = self.cmds[cmd](msg)
         elif self._parent and self._parent.valid_cmd(cmd):
             LOG.debug('%s.process_cmd, cmd in parent %s' % 
                     (self.__repr__(), self._parent.__repr__()))
             result = self._parent.do_cmd(self, cmd, arg)
-            #selfMsg, targetMsg, othersMsg = self._parent.cmds[cmd](msg)
         else:
             # search children
             for child in self._children: 
@@ -87,7 +91,6 @@ class MudObject(object):
                     LOG.debug('%s.process_cmd, cmd in children %s' %
                             (self.__repr__(), child.__repr__()))
                     result = child.do_cmd(self, cmd, arg)
-                    #selfMsg, targetMsg, othersMsg = child.cmds[cmd](msg)
                     break
 
             # search siblings
@@ -100,13 +103,16 @@ class MudObject(object):
                     LOG.debug('%s.process_cmd, cmd in sibling %s' %
                             (self.__repr__(), child.__repr__()))
                     result = child.do_cmd(self, cmd, arg)
-                    #selfMsg, targetMsg, othersMsg = child.cmds[cmd](msg)
                     break
 
     def valid_cmd(self, cmd):
         return cmd in self.cmds
 
     def do_cmd(self, caller, cmd, arg):
+        """\
+        This method will find the cmd from self.cmds (which must be
+        a MudAction) and will construct it to action it.
+        """
         # FIXME - this is NOT what I designed.
         LOG.debug('%s.do_cmd(%s, %s, %s)' % \
                 (self.__repr__(), 
@@ -115,35 +121,36 @@ class MudObject(object):
                     arg.__repr__()
                 ))
         aC = self.cmds[cmd]
-        if type(aC).__name__ == 'classobj' and issubclass(aC, MudAction):
-            # FIXME get support of the other variables into here.
-            # (self, trail, caller, target, second, caller_sibs):
-            a = aC(arg, self)
-            a.call()
-        else:
-            aC(arg)
+        a = aC(self, trail=arg)
+        return a.call()
 
     def send(self, msg):
-        pass
+        LOG.debug('%s received %s' % (self.__repr__(), msg.__repr__()))
 
+    addNotify = ObjAddNotify
     def add(self, obj):
         # assume contents to be list
-        # obj.parent = self  # XXX - ??? consequences?
-        # XXX - order may not look "correct", but it is probably right
-        #   because of not needing to message the same object twice as
-        #   object enters list.
-        # FIXME - should NOT do messaging here, use MudAction
-        self.msg_children('%s enters.' % obj)
-        obj.send('You enter %s' % self)
+        if obj._parent is not None:
+            # XXX - uh, how did this happen?
+            LOG.warning('%s.add(0bj=%s), obj already has parent %s.  Aborted.'\
+                    % (self.__repr__(), obj.__repr__(), obj._parent.__repr__()))
+            return False
+        obj._parent = self
         self._children.append(obj)
+        e = self.addNotify(caller=self, target=obj)
+        e.call()
+        return True
 
+    removeNotify = ObjAddNotify
     def remove(self, obj):
         if obj in self._children: 
             self._children.remove(obj)
+            if obj._parent == self:
+                # only unset object's parent if this item is the true
+                # parent.
+                obj._parent = None
         # else FIXME put warning
-        # FIXME - should NOT do messaging here, use MudAction
-        obj.send('You have left %s' % self)
-        self.msg_children('%s leaves.' % obj)
+        e = self.removeNotify(caller=self, target=obj)
 
     def msg_children(self, msg, omit=[], objs=None):
         if objs:
@@ -163,6 +170,8 @@ class MudSprite(MudObject):
 
 
 class MudPlayer(MudSprite):
+    room = property(fget=lambda self: self._parent)
+
     def __init__(self, name='Guest', *args, **kwargs):
         MudSprite.__init__(self, *args, **kwargs)
         self._other_souls = []  # XXX - ???
@@ -176,7 +185,6 @@ class MudPlayer(MudSprite):
 
         # contents...
         # FIXME - uh, better change this to attribute
-        self.room = lambda: self._parent
         self.inventory = self._children
 
     def __str__(self):
@@ -199,10 +207,10 @@ class MudRoom(MudObject):
         # generic mudroom
         MudObject.__init__(self, shortdesc=shortdesc, *args, **kwargs)
 
-    def add(self, obj):
-        # XXX - fix this and use _parent
-        obj.room = self
-        return MudObject.add(self, obj)
+    #def add(self, obj):
+    #    # XXX - fix this and use _parent
+    #    obj.room = self
+    #    return MudObject.add(self, obj)
 
 
 class SoulGateKeeper(MudObject):
@@ -352,7 +360,8 @@ class Soul(MudObject):
                     iac_c = 0
                     self.request.send('\xff\xfb\x06')
             if c in CMD_TERM:
-                if line:
+                # XXX only send prompt on carriage return
+                if line or (not line and c == CHAR_TERM):
                     lines.append(''.join(line))
                     line = []
         if line:
@@ -422,6 +431,14 @@ class Soul(MudObject):
             self.send('You have been disconnected!')
 
     # support
+    def process_cmd(self, *args, **kwargs):
+        result = MudObject.process_cmd(self, *args, **kwargs)
+        # XXX this should be generalized to find out if _parent offers
+        # a prompt
+        if type(self._parent) != SoulGateKeeper:
+            self.prompt()
+        return result
+
     def prompt(self):
         self.request.send('\xff\xfd\x01')
         self.request.send(STD_PROMPT)

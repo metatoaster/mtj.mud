@@ -96,6 +96,8 @@ class MudServerController(MudRunner):
     that will listen on HOST:PORT once its start method is called.
     """
 
+    listenAddr = property(lambda self: (self.host, self.port))
+
     def __init__(self, host, port, *args, **kwargs):
         """\
         Initializes the controller, set constants from config file, etc.
@@ -109,7 +111,6 @@ class MudServerController(MudRunner):
         self.chats['global'] = ChatChannel()
         self.host = host
         self.port = port
-        self.listenAddr = (host, port)  # redefine from somewhere?
 
     def _begin(self):
         if self._running:
