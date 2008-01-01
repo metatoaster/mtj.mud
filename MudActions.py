@@ -238,6 +238,17 @@ class ObjRemoveNotify(MudNotify):
         self.caller_childrenMsg = '%s leaves.' % (self.target)
 
 
+class History(MudNotify):
+    """\
+    Usage: history
+
+    This command shows you the history
+    """
+
+    def setResponse(self): #, caller, target, others, caller_siblings):
+        self.callerMsg = self.caller.history()
+
+
 class Say(MudNotify):
     """\
     Usage: say <message>

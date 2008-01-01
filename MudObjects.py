@@ -5,6 +5,7 @@
 import logging
 import traceback
 from socket import error as SocketError
+from collections import deque
 
 from config import *
 from MudActions import *
@@ -41,6 +42,10 @@ class MudObject(object):
         # commands usable by children
         self.children_cmds = {}
 
+        # identifiers are hints to others on what else can select this
+        # object.
+        self._id = []
+
         # attributes will be used by players (and mobs) to determine
         # their strengths, agility, or basically statistics of them.
         # rooms could have temperature and water level attributes.
@@ -48,9 +53,16 @@ class MudObject(object):
         # attributes exported by the area they belong to
         self.attributes = {}
 
+        # tags are what normally gets tacked onto objects, not sure
+        # how exactly this will be implemented.
+        self.tag = []
+
         self._children = []  # XXX - call this better?
         self._parent = None  # XXX - can we make this more... dynamic?
         self._hb = None  # heartbeat
+
+    def __iter__(self):
+        return self._children.__iter__()
 
     def __str__(self):
         return self.shortdesc
@@ -126,6 +138,7 @@ class MudObject(object):
                  )
         aC = self.cmds[cmd]
         # XXX this a sufficient check for valid class type?
+        # XXX this check fails on a reload
         if type(aC).__name__ == 'classobj' and issubclass(aC, MudNotify):
             a = aC(self, trail=arg)
             return a.call()
@@ -164,14 +177,28 @@ class MudObject(object):
         if self.removeNotify:
             e = self.removeNotify(caller=self, target=obj)
 
-    def msg_children(self, msg, omit=[], objs=None):
-        if objs:
-            O = objs
-        else:
-            O = self._children
-        for o in O:
-            if o not in omit:
-                o.send(msg)
+    def find_id(self, id_):
+        """\
+        Finds the object by the id supplied.
+
+        Parameters:
+        id_ - the string identifier to look for.
+        """
+        for i in self._children:
+            if id_ in i.id:
+                return i
+        return None
+
+    def _get_id(self):
+        """\
+        Returns a list of identifiers.
+        """
+        result = []
+        result.extend(self.shortdesc)
+        result.extend(self._id)
+        return result
+
+    id = property(fget=_get_id)
 
 
 class MudSprite(MudObject):
@@ -179,6 +206,10 @@ class MudSprite(MudObject):
     def __init__(self, soul=None, *args, **kwargs):
         self.soul = soul
         MudObject.__init__(self, *args, **kwargs)
+
+    def send(self, msg):
+        if self.soul and type(self.soul) is Soul:
+            self.soul.send(msg)
 
 
 class MudPlayer(MudSprite):
@@ -190,13 +221,15 @@ class MudPlayer(MudSprite):
         self._other_souls = []  # XXX - ???
         self.shortdesc = name  # have to be regenerated on title change
         self.name = name
-        self.title = ''  # titles are like 'Duke', 'Guildmaster'
+        # titles look like 'Duke %s, the Brave', with %s replaced by
+        # player's name
+        self.title = ''
         self.cmds = {
             'look': Look,
             'say': Say,
         }  # dictionary of special commands
 
-    def __str__(self):
+    def _full_name(self):
         if '%s' in self.title:
             try:
                 result = self.title % self.shortdesc
@@ -206,9 +239,9 @@ class MudPlayer(MudSprite):
         else:
             result = self.shortdesc
         return result
-
-    def send(self, msg):
-        self.soul.send(msg)
+    
+    full_name = property(fget=_full_name)
+    __str__ = _full_name
 
 
 class MudRoom(MudObject):
@@ -261,8 +294,9 @@ class SoulGateKeeper(MudObject):
             self.soul.send('You logged in as %s/%s' % (self.login, self.password))
             self.soul.send('Logins do not work now, so just exist as a soul without a real body.')
             # XXX - load the body the user originally created.
+            # FIXME - problem lines here, it's supposed to be a link
+            # of some sort.
             body = MudPlayer(name=self.login, soul=self.soul)
-            # FIXME - problem line here
             self.soul._parent = body
             # FIXME - um, use the queue to move player into room?
             room = self.soul.driver.starting['main']
@@ -287,6 +321,7 @@ class Soul(MudObject):
         fget=lambda self: self._parent,
         fset=set_body,
     )
+    logged_in = property(fget=lambda self: type(self.body) != SoulGateKeeper)
 
     def __init__(self, handler=None, *args, **kwargs):
         # XXX - may not be too smart about giving a user control object
@@ -300,10 +335,16 @@ class Soul(MudObject):
         self.controller = handler.server.controller
         self.driver = handler.server.controller.driver
 
-        self.cmd_history = []
+        self.cmd_history = deque()
+        self.cmd_offset = 1
         self.bad_count = 0
         self.online = None
 
+        self.settings = {
+          'max_history': 30,
+        }
+
+        # keep tracks of incoming rawdata
         self.rawq = []
 
         # the bodies
@@ -311,6 +352,7 @@ class Soul(MudObject):
         # no () at the end so not to call it now
         self.cmds = {
             'quit': Quit,
+            'history': History,
         }
 
     # communication
@@ -420,12 +462,12 @@ class Soul(MudObject):
                     # handle command parsing here
                     self.bad_count = 0
                     cmd = data.strip()
-                    self.cmd_history.append(cmd)
                     if cmd:
                         LOG.debug('%s cmd: %s',
                                   str(self.handler.client_address), 
                                   cmd.__repr__(),
                                  )
+                        self.rec_history(cmd)
                     # send to queue
                     self.driver.Q(self, cmd)
             except SocketError:
@@ -471,11 +513,26 @@ class Soul(MudObject):
         LOG.debug('created soul %s', self)
         self.send('hi %s' % str(self.handler.client_address))
 
+    def history(self):
+        # XXX - the list cmd sending requires cmd param...
+        result = []
+        for h in enumerate(self.cmd_history):
+            result.append(' %4d  %s' % (h[0] + self.cmd_offset, h[1]))
+        return '\r\n'.join(result)
+
     def quit(self):
         # XXX - the list cmd sending requires cmd param...
         self.send('Goodbye %s, see you soon.' % str(self.body.name))
         self.online = False
         return True
+
+    def rec_history(self, cmd):
+        if not self.logged_in:
+            return None
+        self.cmd_history.append(cmd)
+        if len(self.cmd_history) > self.settings['max_history']:
+            self.cmd_offset += 1
+            self.cmd_history.popleft()
 
 
 class ChatChannel(MudObject):
