@@ -78,6 +78,11 @@ return reference to the instance, or instantiate a news instance of the
 class (and returns it).
 
 
+Transient Souls
+===============
+Must not have multiple references to souls.
+
+
 Rough idea on action classes
 ============================
 Just some rough methods of what should be done.  It will *not* look

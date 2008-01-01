@@ -8,13 +8,13 @@ from config import *
 LOG = logging.getLogger("MudActions")
 
 
-class MudAction():
+class MudNotify():
     """\
-    Ancestor class to encapsulate an action.
+    Ancestor class to encapsulate notification routines.
 
-    Currently this may be better named as a MudMessage class, as this
-    defines the messages that need to be sent and finding the proper
-    defined objects to send the message to.
+    This class is instantiated to send a message to related MudObjects
+    using their send method.  It's up to the targeted class on what to
+    do to the message(s) they receive.
     """
 
     def __init__(
@@ -24,6 +24,8 @@ class MudAction():
             second=None, 
             caller_siblings=None, 
             caller_children=None,
+            target_siblings=None, 
+            target_children=None,
             trail=None,
         ):
         """\
@@ -47,6 +49,8 @@ class MudAction():
         self.second = second
         self._caller_siblings = caller_siblings
         self._caller_children = caller_children
+        self._target_siblings = target_siblings
+        self._target_children = target_children
 
         # default outputs
         self.callerMsg = None
@@ -54,10 +58,12 @@ class MudAction():
         self.secondMsg = None
         self.caller_siblingsMsg = None
         self.caller_childrenMsg = None
+        self.target_siblingsMsg = None
+        self.target_childrenMsg = None
 
         self.setResponse()
 
-    def _get_clean_children(self, param, obj):
+    def _get_clean_children(self, param, obj, rem=None):
         """\
         Using param (one of the related self._ variables) to determine
         a list of chosen children, with the list cleaned of caller,
@@ -70,7 +76,8 @@ class MudAction():
             if obj:
                 result.extend(obj._children)
                 # remove extras.
-                rem = set([self.caller, self.target, self.second])
+                if type(rem) not in (list, set):
+                    rem = set([self.caller, self.target, self.second])
                 # XXX smarter way to deal with this nested
                 for r in rem:
                     if r in result:
@@ -89,15 +96,25 @@ class MudAction():
                 self._caller_siblings, self.caller._parent)
     caller_siblings = property(fget=_get__caller_siblings)
 
+    def _get__target_children(self):
+        return self._get_clean_children(
+                self._target_children, self.target)
+    target_children = property(fget=_get__target_children)
+
+    def _get__target_siblings(self):
+        return self._get_clean_children(
+                self._target_siblings, self.target._parent)
+    target_siblings = property(fget=_get__target_siblings)
+
     def call(self):
         """\
-        Call this method to commit the action.
+        Call this method to send the message.
 
-        This may be converted into a metaclass?
+        This may be converted into a metaclass method?
         """
-        result = self.action()
         self._send()
-        return result
+        # XXX always True?
+        result = True
 
     def _send(self):
         """\
@@ -124,6 +141,23 @@ class MudAction():
         selected caller and targets.
         """
 
+
+class MudAction(MudNotify):
+    """\
+    This class not only does what MudNotify can, but can also action
+    something if the action method is redefined.
+    """
+
+    def call(self):
+        """\
+        Call this method to send the message and call action.
+
+        This may be converted into a metaclass method?
+        """
+        result = self.action()
+        self._send()
+        return result
+
     def action(self):
         """\
         Redefine this method to process other actions that may need to
@@ -131,7 +165,7 @@ class MudAction():
         """
 
 
-class MudActionDefault(MudAction):
+class MudNotifyDefault(MudNotify):
     """\
     An Example MudAction class.
     """
@@ -173,10 +207,12 @@ class MudActionMulti():
         pass
 
 
-class ObjAddNotify(MudAction):
+class ObjAddNotify(MudNotify):
     """\
     Ancestor class that enables notification of siblings and object
     that got added.
+
+    Perhaps turning this into an action class may be better.
     """
 
     def setResponse(self): #, caller, target, others, caller_siblings):
@@ -186,10 +222,12 @@ class ObjAddNotify(MudAction):
         self.caller_childrenMsg = '%s enters.' % (self.target)
 
 
-class ObjRemoveNotify(MudAction):
+class ObjRemoveNotify(MudNotify):
     """\
     Ancestor class that enables notification of siblings and object
     that got removed.
+
+    Perhaps turning this into an action class may be better.
     """
 
     def setResponse(self): #, caller, target, others, caller_siblings):
@@ -199,7 +237,7 @@ class ObjRemoveNotify(MudAction):
         self.caller_childrenMsg = '%s leaves.' % (self.target)
 
 
-class Say(MudAction):
+class Say(MudNotify):
     """\
     Usage: say <message>
 
@@ -218,21 +256,31 @@ class Say(MudAction):
                 'detrimental to your health.'
 
 
+class Quit(MudAction):
+    """\
+    Usage: quit
+
+    This command will safely quit you out of this world, and hopefully
+    returns you back into the real world.
+    """
+
+    def setResponse(self): #, caller, target, others, caller_siblings):
+        # message every siblings
+        self._caller_siblings = True
+        self.condition = not self.trail
+        if self.trail:
+            self.callerMsg = 'Quit what?'
+        else:
+            self.caller_siblingsMsg = '%s has left this world.' % (self.caller)
+
+    def action(self):
+        if self.condition:
+            self.caller.quit()
+
+
 class _Look():
+
     def _look(self, room, contents):
-        """\
-        Example output might be something like:
-
-        Empty Room
-
-        This is a very empty room.
-                There are no obvious exits.
-
-         Player
-         Guest
-         Somebody
-
-        """
         x = []
         x.append('%s\r\n\r\n%s\r\n' % (room.shortdesc, room.longdesc))
         # if type(room):
@@ -241,8 +289,15 @@ class _Look():
             x.append(' %s\r\n' % c)
         return ''.join(x)
 
+    def _lookitem(self, room, contents):
+        x = []
+        x.append('%s\r\n\r\n%s\r\n' % (room.shortdesc, room.longdesc))
+        for c in contents:
+            x.append(' %s\r\n' % c)
+        return ''.join(x)
 
-class Look(MudAction, _Look):
+
+class Look(MudNotify, _Look):
     """\
     Usage: look [<item>]
 
@@ -267,7 +322,35 @@ class Look(MudAction, _Look):
             self.callerMsg = "You are not in a room!"
 
 
-class LookFromRoom(MudAction, _Look):
+class LookFromTarget(MudNotify, _Look):
+    """\
+    Using target to look, as if caller using target's eyes to look.
+    
+    Status: Under development.  Items do not work.
+    """
+
+    # this look is a look from the children wanting to see their
+    # parent and surroundings (i.e. caller's siblings)
+
+
+    def _get__target_siblings(self):
+        rem = set([self.target, self.second])
+        return self._get_clean_children(
+                self._target_siblings, self.target._parent, rem)
+    target_siblings = property(fget=_get__target_siblings)
+
+    def setResponse(self): #, caller, target, others, caller_siblings):
+        # setting this to true to enable building of the sibling list
+        self._target_siblings = True
+        room = self.target._parent
+        if room:
+            template = self._look(room, self.target_siblings)
+            self.callerMsg = template
+        else:
+            self.callerMsg = "You are not in a room!"
+
+
+class LookFromRoom(MudNotify, _Look):
     """\
     If the rooms can look, it will do this.
     

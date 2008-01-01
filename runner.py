@@ -97,6 +97,7 @@ class MudServerController(MudRunner):
     """
 
     listenAddr = property(lambda self: (self.host, self.port))
+    driver = property(lambda self: self._parent)
 
     def __init__(self, host, port, *args, **kwargs):
         """\
@@ -104,9 +105,9 @@ class MudServerController(MudRunner):
         
         Currently does nothing too important for now.
         """
+        # parent is the driver
         MudRunner.__init__(self, *args, **kwargs)
         self.server = None
-        self.driver = None
         self.chats = {}
         self.chats['global'] = ChatChannel()
         self.host = host
@@ -144,13 +145,22 @@ class MudDriver(MudRunner):
     This is what drives all actions in the mud, or where main events
     spawned by objects of the world should execute in.
     """
+    nexthb = property(fget=lambda self: self.lasthb + self.hbdelay)
+
     def __init__(self, *args, **kwargs):
+        # children are servers serving this world
         MudRunner.__init__(self, *args, **kwargs)
         self.world = []
         self.starting = {}
         self.cmdQ = deque()
+        self.counter = 0
+        self.time = 0
+        self.lasthb = 0  # every timeout
+
         # XXX magic number here
-        self.timeout = 1 / 1000.
+        self.timeout = 0.002  # seconds, default 2 millisecond
+        self.hbdelay = 2  # seconds
+
         self._build_world()
 
     def _begin(self):
@@ -163,16 +173,22 @@ class MudDriver(MudRunner):
             # as append is atomic.
             caller, cmd = self.cmdQ.popleft()
             # FIXME
-            LOG.debug('cmdQ -> %s: %s' % (caller.__repr__(), cmd))
+            LOG.debug('cmdQ -> %s: %s', caller.__repr__(), cmd)
             try:
                 caller.process_cmd(cmd)
             except:
                 LOG.warning(
-                    "%s got an exception: command '%s' from %s" %\
-                    (self.__repr__(), cmd.__repr__(), caller.__repr__()))
+                    "%s got an exception: command '%s' from %s",
+                    self.__repr__(), cmd.__repr__(), caller.__repr__())
                 LOG.warning(traceback.format_exc())
                 caller.send('A serious error has occurred!')
             # parse cmd
+        self.counter += 1
+        self.time = time.time()
+        if self.time >= self.nexthb:
+            self.lasthb = self.time
+            LOG.log(1, 'heartbeat @ %f', self.lasthb)
+            # do checks and heartbeats here.
         # all done, go sleep for a bit.
         time.sleep(self.timeout)
 
@@ -190,7 +206,7 @@ class MudDriver(MudRunner):
         """\
         Queue a command.  Commands are just strings.
         """
-        LOG.debug('cmdQ <- %s: %s' % (caller.__repr__(), cmd))
+        LOG.debug('cmdQ <- %s: %s', caller.__repr__(), cmd)
         self.cmdQ.append((caller, cmd,))
         # this is an atomic operation.
 

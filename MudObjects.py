@@ -4,6 +4,7 @@
 
 import logging
 import traceback
+from socket import error as SocketError
 
 from config import *
 from MudActions import *
@@ -74,22 +75,22 @@ class MudObject(object):
 
         # XXX - Not sure what command model/hierarchy to use
         # This model is search for commands to act on
-        LOG.debug('%s.process_cmd [%s, %s]' % \
-                (self.__repr__(), cmd.__repr__(), arg.__repr__()))
+        LOG.debug('%s.process_cmd [%s, %s]',
+                  self.__repr__(), cmd.__repr__(), arg.__repr__())
         result = None
         if self.valid_cmd(cmd):
-            LOG.debug('%s.process_cmd, cmd in self' % (self.__repr__()))
+            LOG.debug('%s.process_cmd, cmd in self' , self.__repr__())
             result = self.do_cmd(self, cmd, arg)
         elif self._parent and self._parent.valid_cmd(cmd):
-            LOG.debug('%s.process_cmd, cmd in parent %s' % 
-                    (self.__repr__(), self._parent.__repr__()))
+            LOG.debug('%s.process_cmd, cmd in parent %s',
+                      self.__repr__(), self._parent.__repr__())
             result = self._parent.do_cmd(self, cmd, arg)
         else:
             # search children
             for child in self._children: 
                 if child.valid_cmd(cmd):
-                    LOG.debug('%s.process_cmd, cmd in children %s' %
-                            (self.__repr__(), child.__repr__()))
+                    LOG.debug('%s.process_cmd, cmd in children %s',
+                              self.__repr__(), child.__repr__())
                     result = child.do_cmd(self, cmd, arg)
                     break
 
@@ -100,10 +101,14 @@ class MudObject(object):
                 siblings = self._parent._children
             for child in siblings:
                 if child.valid_cmd(cmd):
-                    LOG.debug('%s.process_cmd, cmd in sibling %s' %
-                            (self.__repr__(), child.__repr__()))
+                    LOG.debug('%s.process_cmd, cmd in sibling %s',
+                              self.__repr__(), child.__repr__())
                     result = child.do_cmd(self, cmd, arg)
                     break
+        if result == None:
+            # guess nothing is found.
+            self.send('%s not a valid command, please try again!' % 
+                cmd.__repr__())
 
     def valid_cmd(self, cmd):
         return cmd in self.cmds
@@ -113,34 +118,40 @@ class MudObject(object):
         This method will find the cmd from self.cmds (which must be
         a MudAction) and will construct it to action it.
         """
-        # FIXME - this is NOT what I designed.
-        LOG.debug('%s.do_cmd(%s, %s, %s)' % \
-                (self.__repr__(), 
-                    caller.__repr__(), 
-                    cmd.__repr__(), 
-                    arg.__repr__()
-                ))
+        LOG.debug('%s.do_cmd(%s, %s, %s)',
+                  self.__repr__(), 
+                  caller.__repr__(), 
+                  cmd.__repr__(), 
+                  arg.__repr__(),
+                 )
         aC = self.cmds[cmd]
-        a = aC(self, trail=arg)
-        return a.call()
+        # XXX this a sufficient check for valid class type?
+        if type(aC).__name__ == 'classobj' and issubclass(aC, MudNotify):
+            a = aC(self, trail=arg)
+            return a.call()
+        else:
+            raise TypeError('%s is not subclass of MudNotify' % aC)
 
     def send(self, msg):
-        LOG.debug('%s received %s' % (self.__repr__(), msg.__repr__()))
+        LOG.debug('%s received %s', self.__repr__(), msg.__repr__())
 
+    # XXX - may not be desirable for default
     addNotify = ObjAddNotify
     def add(self, obj):
         # assume contents to be list
         if obj._parent is not None:
             # XXX - uh, how did this happen?
-            LOG.warning('%s.add(0bj=%s), obj already has parent %s.  Aborted.'\
-                    % (self.__repr__(), obj.__repr__(), obj._parent.__repr__()))
+            LOG.warning('%s.add(0bj=%s), obj already has parent %s.  Aborted.',
+                    self.__repr__(), obj.__repr__(), obj._parent.__repr__())
             return False
         obj._parent = self
         self._children.append(obj)
-        e = self.addNotify(caller=self, target=obj)
-        e.call()
+        if self.addNotify:
+            e = self.addNotify(caller=self, target=obj)
+            e.call()
         return True
 
+    # XXX - may not be desirable for default
     removeNotify = ObjAddNotify
     def remove(self, obj):
         if obj in self._children: 
@@ -150,7 +161,8 @@ class MudObject(object):
                 # parent.
                 obj._parent = None
         # else FIXME put warning
-        e = self.removeNotify(caller=self, target=obj)
+        if self.removeNotify:
+            e = self.removeNotify(caller=self, target=obj)
 
     def msg_children(self, msg, omit=[], objs=None):
         if objs:
@@ -171,6 +183,7 @@ class MudSprite(MudObject):
 
 class MudPlayer(MudSprite):
     room = property(fget=lambda self: self._parent)
+    inventory = property(fget=lambda self: self._children)
 
     def __init__(self, name='Guest', *args, **kwargs):
         MudSprite.__init__(self, *args, **kwargs)
@@ -182,10 +195,6 @@ class MudPlayer(MudSprite):
             'look': Look,
             'say': Say,
         }  # dictionary of special commands
-
-        # contents...
-        # FIXME - uh, better change this to attribute
-        self.inventory = self._children
 
     def __str__(self):
         if '%s' in self.title:
@@ -253,13 +262,14 @@ class SoulGateKeeper(MudObject):
             self.soul.send('Logins do not work now, so just exist as a soul without a real body.')
             # XXX - load the body the user originally created.
             body = MudPlayer(name=self.login, soul=self.soul)
+            # FIXME - problem line here
             self.soul._parent = body
-            # FIXME - this should NOT be here?!
-            #self.soul.prompt()
             # FIXME - um, use the queue to move player into room?
             room = self.soul.driver.starting['main']
             room.add(body)
             body._parent = room
+            # XXX hackish to trick a look
+            Look(self.soul._parent).call()
             #self.soul.body.room = MudObject()
         return True
 
@@ -300,7 +310,7 @@ class Soul(MudObject):
         self._parent = SoulGateKeeper(soul=self)
         # no () at the end so not to call it now
         self.cmds = {
-            'quit': self.quit,
+            'quit': Quit,
         }
 
     # communication
@@ -368,13 +378,19 @@ class Soul(MudObject):
             # append leftovers for next round...
             rawq.append(''.join(line))
         self.rawq = rawq
-        LOG.debug('got lines: %s' % str(lines))
+        LOG.debug('got lines: %s', str(lines))
 
         return lines
 
     def send(self, msg, newline=True):
+        if not self.online:
+            LOG.warning('%s is offline: cannot send %s.',
+                        self.__repr__(),
+                        msg.__repr__(),
+                        )
+            return False
         try:
-            LOG.debug('sending msg: %s' % msg.__repr__())
+            LOG.debug('sending msg: %s', msg.__repr__())
             # XXX - maybe abstract these telnet codes away, or use the
             # telnet class?
             self.request.send('\xff\xfb\x01%s' % msg)
@@ -384,9 +400,10 @@ class Soul(MudObject):
                     self.request.send('\r\n')
             # reset of some sort for a new line
             self.request.send('\xff\xfc\x01')
+            return True
         except:
-            LOG.warning('cannot send message to %s' % self.__repr__())
-            LOG.warning('message was: %s' % msg.__repr__())
+            LOG.warning('cannot send message to %s', self.__repr__())
+            LOG.warning('message was: %s', msg.__repr__())
 
     def loop(self):
         if self.online == None:
@@ -396,8 +413,8 @@ class Soul(MudObject):
         while self.online:
             try:
                 lines = self.recv()
-                LOG.debug('%s command count = (%d)' %
-                        (str(self.handler.client_address), len(lines)))
+                LOG.debug('%s command count = (%d)',
+                        str(self.handler.client_address), len(lines))
                 for data in lines:
                     LOG.debug('processing data')
                     # handle command parsing here
@@ -405,16 +422,22 @@ class Soul(MudObject):
                     cmd = data.strip()
                     self.cmd_history.append(cmd)
                     if cmd:
-                        LOG.debug('%s cmd: %s' % 
-                                (str(self.handler.client_address), 
-                                 cmd.__repr__()))
+                        LOG.debug('%s cmd: %s',
+                                  str(self.handler.client_address), 
+                                  cmd.__repr__(),
+                                 )
                     # send to queue
                     self.driver.Q(self, cmd)
+            except SocketError:
+                # XXX handling different codes may be nice
+                LOG.debug('%s got a socket error, terminating connection.',
+                          self.__repr__())
+                self.online = False
             except:
-                LOG.warning('%s got an exception!' % (self.__repr__()))
+                LOG.warning('%s got an exception!', self.__repr__())
                 LOG.warning(traceback.format_exc())
                 self.send('A serious error has occurred!')
-        LOG.debug('%s is offline, terminating connection.' % str(self))
+        LOG.debug('%s is offline, terminating connection.', str(self))
 
     def handle(self):
         try:
@@ -424,9 +447,9 @@ class Soul(MudObject):
             # currently the login process is _outside_ the exception
             # block, so if login craps out this will definitely be
             # thrown.
-            LOG.warning('%s exception has leaked out of loop!' % \
-                    (self.__repr__()))
-            LOG.warning(traceback.format_exc())
+            LOG.error('%s exception has leaked out of loop!',
+                    self.__repr__())
+            LOG.error(traceback.format_exc())
             self.send('A critical error has occured!')
             self.send('You have been disconnected!')
 
@@ -440,17 +463,18 @@ class Soul(MudObject):
         return result
 
     def prompt(self):
-        self.request.send('\xff\xfd\x01')
-        self.request.send(STD_PROMPT)
+        if self.online:
+            self.request.send('\xff\xfd\x01')
+            self.request.send(STD_PROMPT)
 
     def greeting(self):
-        LOG.debug('created soul %s' % self)
+        LOG.debug('created soul %s', self)
         self.send('hi %s' % str(self.handler.client_address))
 
-    def quit(self, cmd):
+    def quit(self):
         # XXX - the list cmd sending requires cmd param...
-        self.online = False
         self.send('Goodbye %s, see you soon.' % str(self.body.name))
+        self.online = False
         # FIXME - this need to add the body quit to the queue or body
         # may receive item and item disappears along with deconstruct.
 
@@ -461,6 +485,7 @@ class ChatChannel(MudObject):
     # FIXME - MudObject
     def __init__(self, *args, **kwargs):
         # change children to set()?
+        # FIXME - should be links to bodies.
         self.souls = set()  # maybe don't call them souls here?
 
     def join(self, soul):

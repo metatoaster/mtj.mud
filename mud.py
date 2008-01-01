@@ -12,8 +12,14 @@ import threading
 import time
 from config import *
 
-logging.basicConfig(level=logging.DEBUG)
+# XXX - perhaps move this to a local logging class
+logging.basicConfig(level=logging.WARNING)
+logging.addLevelName(9, 'DEBUG-1')
+logging.addLevelName(8, 'DEBUG-2')
+logging.addLevelName(1, 'DEBUG-9')
 
+def setLogLevel(level):
+    logging.root.setLevel(level)
 
 #class MudEvent(MudObject):
 #    """\

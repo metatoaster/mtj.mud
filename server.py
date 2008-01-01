@@ -64,7 +64,7 @@ class ThreadingMudServer(MudConnThread, TCPServer):
         self.active = False
         for soul in self.souls:
             soul.send('Server shutting down.')
-            soul.quit('')
+            soul.quit()
 
 
 class MudRequestHandler(BaseRequestHandler):
@@ -74,7 +74,7 @@ class MudRequestHandler(BaseRequestHandler):
     it.  This may be redesigned in the future.
     """
     def setup(self):
-        LOG.debug('%s connected' % str(self.client_address))
+        LOG.debug('%s connected', str(self.client_address))
         soul = Soul(self)
         self.soul = soul
         self.server.souls.append(soul)
@@ -88,5 +88,5 @@ class MudRequestHandler(BaseRequestHandler):
         if soul in self.server.souls:
             # bye
             self.server.souls.remove(soul)
-        LOG.debug('%s disconnecting' % str(self.client_address))
+        LOG.debug('%s disconnecting', str(self.client_address))
 

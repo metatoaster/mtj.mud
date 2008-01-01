@@ -4,6 +4,7 @@
 
 # Interactive controller for mtmud
 
+from sys import stdout
 from mud import *
 from server import *
 from runner import *
@@ -13,37 +14,55 @@ except:
     pass
 
 if __name__ == '__main__':
-    def start():
+    def _parse_cmd(arg):
+        x = arg.split(' ', 1)
+        if len(x) > 1:
+            return x
+        else:
+            return (arg, None)
+
+    def start(arg=None):
         if not mudserv.isRunning():
             print 'Starting mudserv thread.'
             mudserv.start()
         else:
             print 'mudserv already started.'
 
-    def stop():
+    def stop(arg=None):
         if mudserv.isRunning():
             print 'Stopping mudserv...',
+            stdout.flush()
             mudserv.stop()
             print 'done.'
         else:
             print 'mudserv not started.'
 
-    def drive():
+    def drive(arg=None):
         if not driver.isRunning():
             print 'Starting driver thread.'
             driver.start()
         else:
             print 'driver already driving.'
 
-    def brake():
+    def brake(arg=None):
         if driver.isRunning():
             print 'Stopping driver...',
+            stdout.flush()
             driver.stop()
             print 'done.'
         else:
             print 'driver not driving.'
 
-    def debug():
+    def level(arg=None):
+        if arg and arg.isdigit():
+            level = int(arg)
+            setLogLevel(level)
+            print 'Log level set to %s' % logging.getLevelName(level)
+        else:
+            # XXX perhaps use the string identifiers for level id also
+            print 'Usage: level <num>'
+
+    def debug(arg=None):
         # lolhack
         global eval_mode
         if not eval_mode:
@@ -53,13 +72,14 @@ if __name__ == '__main__':
         if not eval_mode:
             return 'Debug mode off.'
 
-    def quit():
+    def quit(arg):
         # lolhack
         raise EOFError
 
     driver = MudDriver()
     mudserv = MudServerController(host=HOST, port=PORT)
-    mudserv.driver = driver
+    driver.add(mudserv)
+    #mudserv.driver = driver
     active = True
     eval_mode = False
     prompts = {
@@ -72,6 +92,7 @@ if __name__ == '__main__':
          'quit': quit,
          'drive': drive,
          'brake': brake,
+         'level': level,
          'debug()': debug,
          '': str,  # lolhack
     }
@@ -86,10 +107,12 @@ if __name__ == '__main__':
                     print eval(_s)
                 except:
                     exec _s
-            elif _s in root_server_cmd:
-                root_server_cmd[_s]()
             else:
-                print 'Invalid Command.'
+                args = _parse_cmd(_s)
+                if args[0] in root_server_cmd:
+                    root_server_cmd[args[0]](args[1])
+                else:
+                    print 'Invalid Command.'
         except EOFError:
             if eval_mode:
                 eval_mode = False
@@ -108,10 +131,8 @@ if __name__ == '__main__':
         except:
             print traceback.format_exc()
     # stop server if running
-    if mudserv.isRunning():
-        mudserv.stop()
-    if driver.isRunning():
-        driver.stop()
+    stop()
+    brake()
 
     # really quit.
     sys.exit()
