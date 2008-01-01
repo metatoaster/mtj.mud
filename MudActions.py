@@ -114,7 +114,7 @@ class MudNotify():
         """
         self._send()
         # XXX always True?
-        result = True
+        return True
 
     def _send(self):
         """\
