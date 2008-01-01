@@ -475,8 +475,7 @@ class Soul(MudObject):
         # XXX - the list cmd sending requires cmd param...
         self.send('Goodbye %s, see you soon.' % str(self.body.name))
         self.online = False
-        # FIXME - this need to add the body quit to the queue or body
-        # may receive item and item disappears along with deconstruct.
+        return True
 
 
 class ChatChannel(MudObject):

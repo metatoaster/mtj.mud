@@ -163,11 +163,12 @@ class MudAction(MudNotify):
         Redefine this method to process other actions that may need to
         happen before any output is sent.
         """
+        return False
 
 
 class MudNotifyDefault(MudNotify):
     """\
-    An Example MudAction class.
+    An Example MudNotify implementation
     """
 
     def setResponse(self): #, caller, target, others, caller_siblings):
@@ -175,13 +176,13 @@ class MudNotifyDefault(MudNotify):
         Redefine this method to set the output response for the 
         selected caller and targets.
         """
-        self.callerMsg = 'You do MudAction with %s on %s' % \
+        self.callerMsg = 'You action with %s on %s' % \
                 (self.second, self.target)
-        self.targetMsg = '%s does MudAction with %s on you' % \
+        self.targetMsg = '%s does action with %s on you' % \
                 (self.caller, self.second)
-        self.secondMsg = '%s does MudAction with you on %s' % \
+        self.secondMsg = '%s does action with you on %s' % \
                 (self.caller, self.target)
-        self.sibsMsg = '%s does MudAction with %s on %s' % \
+        self.sibsMsg = '%s does action with %s on %s' % \
                 (self.caller, self.second, self.target)
 
 
@@ -276,6 +277,7 @@ class Quit(MudAction):
     def action(self):
         if self.condition:
             self.caller.quit()
+        return True
 
 
 class _Look():

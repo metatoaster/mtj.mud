@@ -1,3 +1,10 @@
+This file keep tracks of what needs to be done in the MUD in the form
+of some rather raw ideas.
+
+-----------------------------------------------------------------------
+Fresh ideas:
+-----------------------------------------------------------------------
+
 Exits
 =====
 - Two types
@@ -21,21 +28,12 @@ Exit1
   exit.enter(person, person.room)
 
 
-Event queue
-===========
-
-This like reader/writer problem
-- each soul act as a reader (multiple readers)
-- the event processor is the writer
-- FIXME - need to demonstrate that this queue works by moving the say command
-to use this queue.
-
-
 World
 =====
 - If there's a list that will keep track of all objects that exist in
 the world, it can help with deleting unwanted objects (like logging out
 people).
+- Same deal for players, to keep track to who can tells be sent to.
 
 
 Commands
@@ -83,6 +81,23 @@ Transient Souls
 Must not have multiple references to souls.
 
 
+Finding objects
+===============
+Since users will be sending requests for objects as strings, there will
+need to be a way to find membership.  Perhaps implementing __iter__ for
+MudObjects will be nice.
+
+Finding item in inventory:
+    MudObj in MudContainer
+
+Finding player logged on:
+    Player in LoggedOnPlayer  # this may need a transient link
+
+
+-----------------------------------------------------------------------
+Implemented Ideas:
+-----------------------------------------------------------------------
+
 Rough idea on action classes
 ============================
 Just some rough methods of what should be done.  It will *not* look
@@ -122,3 +137,12 @@ def moveself(caller, target):
     caller.parent = None
     caller.children = None  # children won't know parent moved
 
+
+Event queue
+===========
+
+This like reader/writer problem
+- each soul act as a reader (multiple readers)
+- the event processor is the writer
+- FIXME - need to demonstrate that this queue works by moving the say command
+to use this queue.
