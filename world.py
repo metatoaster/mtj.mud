@@ -5,17 +5,19 @@ class Foundation(MudArea):
     """Base area"""
     def __init__(self, *args, **kwargs):
         MudArea.__init__(self, *args, **kwargs)
-        s = StartRoom()
-        self.add(s)
+        self.add(StartRoom())
         self.add(FlossRoom())
+        self.add(GreenRoom())
 
 
 _StartRoom = """\
     Upon entering this room, you feel a sense of tranquility fall upon
-you.  All around you, wispy tendrils of white vapour rise and fall, as
-if they were trying to orchestrate a dance.  Gazing beyond the vapors,
-soothing white light filters through the clouds all around you, calmly
-basking everything in this room in its white, shadow-less glow.
+you.  Thin, wispy tendrils of white vapor enshrouds everything; they
+rise and fall as if orchestrating a dance.  Further away, the vapor
+becomes thicker, yet not thick enough to prevent the soothing white
+light beyond from filtering through.  The white light is bright, yet
+soothing on your eyes, casts its rays on from all angles on everything
+in this room, easily dispelling most, if not all, shadows away.
 """.replace('\n', '\r\n')
 
 class StartRoom(MudRoom):
@@ -36,3 +38,15 @@ class FlossRoom(MudRoom):
         self.shortdesc = 'Floss Room'
         self.longdesc = _FlossRoom
 
+
+_GreenRoom = """\
+    You are in a room with walls covered in lime green wallpaper.  Upon
+closer inspection of the wallpaper you notice it's made of very fine
+strands of delicious candy floss aligned vertically.
+""".replace('\n', '\r\n')
+
+class GreenRoom(MudRoom):
+    def __init__(self, *args, **kwargs):
+        MudRoom.__init__(self, *args, **kwargs)
+        self.shortdesc = 'Green Room'
+        self.longdesc = _GreenRoom

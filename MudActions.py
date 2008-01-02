@@ -218,9 +218,9 @@ class ObjAddNotify(MudNotify):
 
     def setResponse(self): #, caller, target, others, caller_siblings):
         self._caller_children = True
-        self.callerMsg = '%s enters you.' % (self.target)
-        self.targetMsg = 'You enter %s.' % (self.caller)
-        self.caller_childrenMsg = '%s enters.' % (self.target)
+        self.callerMsg = '%s appears inside you.' % (self.target)
+        self.targetMsg = 'You appear inside %s.' % (self.caller)
+        self.caller_childrenMsg = '%s appears.' % (self.target)
 
 
 class ObjRemoveNotify(MudNotify):
@@ -233,9 +233,9 @@ class ObjRemoveNotify(MudNotify):
 
     def setResponse(self): #, caller, target, others, caller_siblings):
         self._caller_children = True
-        self.callerMsg = '%s leaves you.' % (self.target)
-        self.targetMsg = 'You leave %s.' % (self.caller)
-        self.caller_childrenMsg = '%s leaves.' % (self.target)
+        self.callerMsg = '%s vanishes from you.' % (self.target)
+        self.targetMsg = 'You vanish from %s.' % (self.caller)
+        self.caller_childrenMsg = '%s vanishes.' % (self.target)
 
 
 class History(MudNotify):
