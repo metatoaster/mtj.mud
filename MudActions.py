@@ -242,7 +242,7 @@ class History(MudNotify):
     """\
     Usage: history
 
-    This command shows you the history
+    This command shows you a history of the commands you have entered.
     """
 
     def setResponse(self): #, caller, target, others, caller_siblings):
@@ -289,6 +289,42 @@ class Quit(MudAction):
         if self.condition:
             self.caller.quit()
         return True
+        
+
+class Help(MudNotify):
+    """\
+    Usage: help <command>
+
+    Calling 'help' alone will give you this page and a brief listing on
+    what commands you have access to if called without any arguments.
+    If a valid command you have access to is passed as an argument, the 
+    help for that command will be presented to you.
+    """
+    # FIXME - need to subclass MudNotify to output pages of text
+    # FIXME - eventually need some sort of automagical way to change
+    # newlines to ones with return carriage for things that require it
+    # XXX - Assuming caller to be a Soul.
+
+    def setResponse(self):
+        if self.trail:
+            doc = None
+            if self.trail in self.caller.cmds:
+                doc = self.caller.cmds[self.trail].__doc__
+            elif self.trail in self.caller.body.cmds:
+                doc = self.caller.body.cmds[self.trail].__doc__
+
+            if doc and doc != '':
+                self.callerMsg = doc.replace('\n', '\r\n')
+            else:
+                self.callerMsg = 'There is no help available on that topic.'
+        else:
+            self.callerMsg = self.__doc__.replace('\n', '\r\n')
+            f = ['\r\n    Valid commands are:']
+            for c in self.caller.cmds:
+                f.append('      - %s' % c)
+            for c in self.caller.body.cmds:
+                f.append('      - %s' % c)
+            self.callerMsg += '\r\n'.join(f)
 
 
 class _Look():

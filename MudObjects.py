@@ -117,7 +117,7 @@ class MudObject(object):
                               self.__repr__(), child.__repr__())
                     result = child.do_cmd(self, cmd, arg)
                     break
-        if result == None:
+        if result == None and cmd != '':
             # guess nothing is found.
             self.send('%s not a valid command, please try again!' % 
                 cmd.__repr__())
@@ -154,7 +154,7 @@ class MudObject(object):
         # assume contents to be list
         if obj._parent is not None:
             # XXX - uh, how did this happen?
-            LOG.warning('%s.add(0bj=%s), obj already has parent %s.  Aborted.',
+            LOG.warning('%s.add(obj=%s), obj already has parent %s.  Aborted.',
                     self.__repr__(), obj.__repr__(), obj._parent.__repr__())
             return False
         obj._parent = self
@@ -165,17 +165,53 @@ class MudObject(object):
         return True
 
     # XXX - may not be desirable for default
-    removeNotify = ObjAddNotify
+    removeNotify = ObjRemoveNotify
     def remove(self, obj):
-        if obj in self._children: 
+        result = False
+        if obj not in self._children: 
+            # invalid
+            if obj._parent != self:
+                LOG.debug('%s not in %s; cannot remove', 
+                    obj.__repr__(), self.__repr__())
+                return False
+            else:
+                LOG.warning('%s is not children of but claims %s as parent; '\
+                    'setting %s parent to None', 
+                    obj.__repr__(), self.__repr__(), obj.__repr__())
+                obj._parent = None
+                # may need to notify obj
+                return True
+        else:
             self._children.remove(obj)
             if obj._parent == self:
                 # only unset object's parent if this item is the true
                 # parent.
                 obj._parent = None
+                result = True
+                # completed normal ideal condition
+            else:
+                if obj._parent == None:
+                    LOG.debug('%s did not have a parent to remove.', 
+                        obj.__repr__())
+                    result = True
+                    # this condition is still fine
+                else:
+                    LOG.warning('%s was a children of %s but claims %s as parent.',
+                    obj.__repr__(), self.__repr__(), obj._parent.__repr__())
+                # notification
+                return False
         # else FIXME put warning
         if self.removeNotify:
             e = self.removeNotify(caller=self, target=obj)
+            e.call()
+        return True
+
+    def move_to(self, obj, target):
+        # FIXME - this is not atomic operation
+        # remove could do partial things...
+        if self.remove(obj):
+            return target.add(obj)
+        return False
 
     def find_id(self, id_):
         """\
@@ -194,7 +230,7 @@ class MudObject(object):
         Returns a list of identifiers.
         """
         result = []
-        result.extend(self.shortdesc)
+        result.append(self.shortdesc)
         result.extend(self._id)
         return result
 
@@ -204,12 +240,28 @@ class MudObject(object):
 class MudSprite(MudObject):
     """Anything that is somewhat smart?"""
     def __init__(self, soul=None, *args, **kwargs):
-        self.soul = soul
+        self._soul = soul
         MudObject.__init__(self, *args, **kwargs)
 
     def send(self, msg):
         if self.soul and type(self.soul) is Soul:
             self.soul.send(msg)
+
+    def _set_soul(self, soul):
+        self._soul = soul
+
+    def _get_soul(self):
+        if self._soul and not self._soul.online:
+            # assume to be dead
+            LOG.debug('%s of %s is offline, removing reference',
+                    self._soul.__repr__(), self.__repr__())
+            self._soul = None
+        return self._soul
+
+    soul = property(
+        fget=_get_soul,
+        fset=_set_soul,
+    )
 
 
 class MudPlayer(MudSprite):
@@ -244,15 +296,38 @@ class MudPlayer(MudSprite):
     __str__ = _full_name
 
 
-class MudRoom(MudObject):
+class MudWizard(MudPlayer):
+    # XXX placeholder class?
+    def __init__(self, name='Wizard', *args, **kwargs):
+        MudPlayer.__init(self, name, *args, **kwargs)
+        self.cmds['create'] = Create
+
+
+class MudArea(MudObject):
+    def __init__(self, *args, **kwargs):
+        # generic mudarea
+        MudObject.__init__(self, *args, **kwargs)
+
+
+class MudRoom(MudArea):
     def __init__(self, shortdesc='Empty Room', *args, **kwargs):
         # generic mudroom
         MudObject.__init__(self, shortdesc=shortdesc, *args, **kwargs)
+        self.exits = {}
 
-    #def add(self, obj):
-    #    # XXX - fix this and use _parent
-    #    obj.room = self
-    #    return MudObject.add(self, obj)
+
+class MudExit(MudObject):
+    available_barrier = [None, 'door', 'gate', 'portal',]
+
+    def __init__(self, shortdesc='exit', *args, **kwargs):
+        # generic exit
+        MudObject.__init__(self, shortdesc=shortdesc, *args, **kwargs)
+        self.barrier = None
+        self.exits = {}
+        #self.exits = {
+        #    'north': NorthRoom,
+        #    'south': SouthRoom,
+        #}
 
 
 class SoulGateKeeper(MudObject):
@@ -315,7 +390,7 @@ class Soul(MudObject):
     This object could inherit from MudRunner and replace what 
     MudThread does.
     """
-    # XXX fix this abuse
+    # Would be nice if this is a body transfer technique
     def set_body(self, body): self._parent = body
     body = property(
         fget=lambda self: self._parent,
@@ -350,9 +425,11 @@ class Soul(MudObject):
         # the bodies
         self._parent = SoulGateKeeper(soul=self)
         # no () at the end so not to call it now
+        # This may interfere with creating accounts with these names
         self.cmds = {
             'quit': Quit,
             'history': History,
+            'help': Help,
         }
 
     # communication

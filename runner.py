@@ -13,6 +13,7 @@ from config import *
 from server import *
 from MudObjects import *
 from MudActions import *
+from world import *
 
 LOG = logging.getLogger("runner")
 
@@ -146,11 +147,11 @@ class MudDriver(MudRunner):
     spawned by objects of the world should execute in.
     """
     nexthb = property(fget=lambda self: self.lasthb + self.hbdelay)
+    areas = property(fget=lambda self: self._children)
 
     def __init__(self, *args, **kwargs):
         # children are servers serving this world
         MudRunner.__init__(self, *args, **kwargs)
-        self.world = []
         self.starting = {}
         self.cmdQ = deque()
         self.counter = 0
@@ -198,8 +199,9 @@ class MudDriver(MudRunner):
 
     def _build_world(self):
         # builds the world
+        self.add(Foundation())
         self.starting = {
-            'main': MudRoom(shortdesc='Empty Room', longdesc=DEFAULT_ROOM_DESC),
+            'main': self._children[0]._children[0],
         }
 
     def Q(self, caller, cmd):

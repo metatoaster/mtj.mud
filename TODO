@@ -76,9 +76,18 @@ return reference to the instance, or instantiate a news instance of the
 class (and returns it).
 
 
-Transient Souls
-===============
-Must not have multiple references to souls.
+Transient Objects
+=================
+Since some objects have multiple references to it but not the other way
+around, there must be a mechanism that will destroy those links when
+that object is destroyed.
+
+For instance:
+- There is a list that keep tracks of online souls, with each of those
+  souls pointing to a player.  However, a player is part of the world
+  and a soul isn't, and so the link from player to soul need to be
+  transient.
+- Same deal for chat channels.
 
 
 Finding objects
