@@ -172,17 +172,19 @@ class MudDriver(MudRunner):
             # nobody else is popping this list, so when this is true
             # there must be an item to pop.  No false positives either
             # as append is atomic.
-            caller, cmd = self.cmdQ.popleft()
+            sender, cmd = self.cmdQ.popleft()
             # FIXME
-            LOG.debug('cmdQ -> %s: %s', caller.__repr__(), cmd)
+            LOG.debug('cmdQ -> (%s, %s)', sender.__repr__(), cmd.__repr__())
             try:
-                caller.process_cmd(cmd)
+                cmd.call()
+                # XXX prompt
+                if isinstance(sender, Soul):
+                    sender.prompt()
             except:
                 LOG.warning(
-                    "%s got an exception: command '%s' from %s",
-                    self.__repr__(), cmd.__repr__(), caller.__repr__())
+                    "command '%s' caused an exception", cmd.__repr__())
                 LOG.warning(traceback.format_exc())
-                caller.send('A serious error has occurred!')
+                sender.send('A serious error has occurred!')
             # parse cmd
         self.counter += 1
         self.time = time.time()
@@ -204,11 +206,11 @@ class MudDriver(MudRunner):
             'main': self._children[0]._children[0],
         }
 
-    def Q(self, caller, cmd):
+    def Q(self, cmd, sender=None):
         """\
         Queue a command.  Commands are just strings.
         """
-        LOG.debug('cmdQ <- %s: %s', caller.__repr__(), cmd)
-        self.cmdQ.append((caller, cmd,))
+        LOG.debug('cmdQ <- (%s, %s)', sender.__repr__(), cmd.__repr__())
+        self.cmdQ.append((sender, cmd))
         # this is an atomic operation.
 

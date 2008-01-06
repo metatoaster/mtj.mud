@@ -34,13 +34,13 @@ class MudObject(object):
         self.longdesc = longdesc
 
         # commands for this object (should only used by self)
-        self.cmds = {}
+        self._cmds = {}
         # commands usable by siblings
-        self.sibling_cmds = {}
+        self._siblings_cmds = {}
         # commands usable by parent
-        self.parent_cmds = {}
+        self._parent_cmds = {}
         # commands usable by children
-        self.children_cmds = {}
+        self._children_cmds = {}
 
         # identifiers are hints to others on what else can select this
         # object.
@@ -67,6 +67,22 @@ class MudObject(object):
     def __str__(self):
         return self.shortdesc
 
+    def _get_children(self):
+        result = []
+        result.extend(self._children)
+        return result
+
+    children = property(fget=_get_children)
+
+    def _get_siblings(self):
+        if not self._parent:
+            # XXX this consistent?
+            # reason: no parent, none
+            return None
+        return self._parent.children
+
+    siblings = property(fget=_get_siblings)
+
     def _parse_cmd(self, input):
         x = input.split(' ', 1)
         if len(x) > 1:
@@ -77,73 +93,106 @@ class MudObject(object):
     def process_cmd(self, input):
         """\
         This method will process the input and find the command to
-        execute by the owner of this method, which will then call
-        do_cmd.
+        execute, and will attempt to call each init_obj.
+        """
+
+        __algo = """\
+        This is what the algorithm should look like:
+
+        - Parse command
+        - Find which object has this command, and construct the proper
+          object
+        - Done?
         """
         # XXX - should checks like these be required?
         #if not self.valid_cmd(cmd):
         #    return None
         cmd, arg = self._parse_cmd(input)
+        LOG.debug('%s.process_cmd [%s, %s]',
+                  self.__repr__(), cmd.__repr__(), arg.__repr__())
+
+        if not cmd:
+            return None
 
         # XXX - Not sure what command model/hierarchy to use
         # This model is search for commands to act on
-        LOG.debug('%s.process_cmd [%s, %s]',
-                  self.__repr__(), cmd.__repr__(), arg.__repr__())
-        result = None
-        if self.valid_cmd(cmd):
-            LOG.debug('%s.process_cmd, cmd in self' , self.__repr__())
-            result = self.do_cmd(self, cmd, arg)
-        elif self._parent and self._parent.valid_cmd(cmd):
-            LOG.debug('%s.process_cmd, cmd in parent %s',
-                      self.__repr__(), self._parent.__repr__())
-            result = self._parent.do_cmd(self, cmd, arg)
-        else:
-            # search children
-            for child in self._children: 
-                if child.valid_cmd(cmd):
-                    LOG.debug('%s.process_cmd, cmd in children %s',
-                              self.__repr__(), child.__repr__())
-                    result = child.do_cmd(self, cmd, arg)
+        cmd_self = ('self', self)
+        cmd_parent = ('parent', self._parent)
+        cmd_children = ('child', self.children)
+        # XXX this would *include* self, potential side effect that
+        # will allow self pushing self, for instance.  this may need
+        # to be fixed by the method that offers sibling...
+        cmd_siblings = ('sibling', self.siblings)
+
+        valid = (cmd_self, cmd_parent, cmd_children, cmd_siblings)
+
+        # FIXME - kill these breaks.
+        for name, obj in valid:
+            objs = obj
+            if not type(obj) is list:
+                objs = [obj]
+            for target in objs:
+                # this line will always execute because self is not None
+                result = target.init_cmd(self, cmd, arg)
+                if result:
+                    LOG.debug('%s.process_cmd, cmd in %s %s',
+                              self.__repr__(), name, target.__repr__())
+
                     break
+            if result:
+                break
 
-            # search siblings
-            # XXX child = sibling here
-            siblings = []
-            if self._parent:
-                siblings = self._parent._children
-            for child in siblings:
-                if child.valid_cmd(cmd):
-                    LOG.debug('%s.process_cmd, cmd in sibling %s',
-                              self.__repr__(), child.__repr__())
-                    result = child.do_cmd(self, cmd, arg)
-                    break
-        if result == None and cmd != '':
-            # guess nothing is found.
-            self.send('%s not a valid command, please try again!' % 
-                cmd.__repr__())
+        return result
 
-    def valid_cmd(self, cmd):
-        return cmd in self.cmds
-
-    def do_cmd(self, caller, cmd, arg):
+    def init_cmd(self, caller, cmd, arg):
         """\
-        This method will find the cmd from self.cmds (which must be
+        This method will find the cmd from self._cmds (which must be
         a MudAction) and will construct it to action it.
+
+        Ideally this should not be overridden, but objects that needs
+        to trap input (for instance, login) have to do so for now.
         """
-        LOG.debug('%s.do_cmd(%s, %s, %s)',
+        LOG.debug('%s.init_cmd(%s, %s, %s)',
                   self.__repr__(), 
                   caller.__repr__(), 
                   cmd.__repr__(), 
                   arg.__repr__(),
                  )
-        aC = self.cmds[cmd]
+        # find relationship of self to caller
+        # note: finding it here because calling from caller, the
+        # relationship cmds will be reversed 
+        if self == caller:
+            cmds = self._cmds
+        elif self == caller._parent:
+            """
+            target = self
+            if target is the parent of the caller
+            self/target self.parent
+            caller/self
+            """
+            cmds = self._parent_cmds
+        elif self in caller.children:
+            # implies self._parent == caller
+            cmds = self._children_cmds
+        elif self in caller.siblings:
+            cmds = self._siblings_cmds
+
+        if not cmd in cmds:
+            return None
+
+        aC = cmds[cmd]
         # XXX this a sufficient check for valid class type?
         # XXX this check fails on a reload
-        if type(aC).__name__ == 'classobj' and issubclass(aC, MudNotify):
+        if issubclass(aC, MudNotify):
+            # XXX may need to parse the trail and construct the notify
+              # with proper targets, etc.
             a = aC(self, trail=arg)
-            return a.call()
+            return a
+            # this is the old way
+            #return a.call()
         else:
-            raise TypeError('%s is not subclass of MudNotify' % aC)
+            raise TypeError('%s (%s) is not subclass of MudNotify' %\
+                (aC, type(aC)))
 
     def send(self, msg):
         LOG.debug('%s received %s', self.__repr__(), msg.__repr__())
@@ -276,9 +325,12 @@ class MudPlayer(MudSprite):
         # titles look like 'Duke %s, the Brave', with %s replaced by
         # player's name
         self.title = ''
-        self.cmds = {
+        self._cmds = {
             'look': Look,
             'say': Say,
+            'quit': Quit,
+            'history': History,
+            'help': Help,
         }  # dictionary of special commands
 
     def _full_name(self):
@@ -300,7 +352,7 @@ class MudWizard(MudPlayer):
     # XXX placeholder class?
     def __init__(self, name='Wizard', *args, **kwargs):
         MudPlayer.__init(self, name, *args, **kwargs)
-        self.cmds['create'] = Create
+        self._cmds['create'] = Create
 
 
 class MudArea(MudObject):
@@ -350,8 +402,10 @@ class SoulGateKeeper(MudObject):
     def valid_cmd(self, cmd):
         return True
 
-    def do_cmd(self, caller, cmd, arg):
-        # XXX - this should be do_cmd
+    def init_cmd(self, caller, cmd, arg):
+        """\
+        Overrides the default, as it needs to have exclusive control.
+        """
         # these sends directly to souls here are probably bad practice
         if type(cmd) is list:
             # XXX - like no error checking...
@@ -366,8 +420,8 @@ class SoulGateKeeper(MudObject):
         if self.login and self.password:
             # do login
             self.soul.send('')
-            self.soul.send('You logged in as %s/%s' % (self.login, self.password))
-            self.soul.send('Logins do not work now, so just exist as a soul without a real body.')
+            self.soul.send('You logged in as %s.' % (self.login))
+            self.soul.send('This world is still work in progress, thus no actions by your character is permanent.')
             # XXX - load the body the user originally created.
             # FIXME - problem lines here, it's supposed to be a link
             # of some sort.
@@ -378,7 +432,7 @@ class SoulGateKeeper(MudObject):
             room.add(body)
             body._parent = room
             # XXX hackish to trick a look
-            Look(self.soul._parent).call()
+            self.soul.driver.Q(Look(self.soul._parent), self.soul)
             #self.soul.body.room = MudObject()
         return True
 
@@ -426,10 +480,7 @@ class Soul(MudObject):
         self._parent = SoulGateKeeper(soul=self)
         # no () at the end so not to call it now
         # This may interfere with creating accounts with these names
-        self.cmds = {
-            'quit': Quit,
-            'history': History,
-            'help': Help,
+        self._cmds = {
         }
 
     # communication
@@ -544,9 +595,25 @@ class Soul(MudObject):
                                   str(self.handler.client_address), 
                                   cmd.__repr__(),
                                  )
-                        self.rec_history(cmd)
+                        self.rec_history(data)
                     # send to queue
-                    self.driver.Q(self, cmd)
+                    a = self.body.process_cmd(cmd)
+                    logging.debug('process_cmd returns: %s', a.__repr__())
+                    if isinstance(a, MudNotify):
+                        self.driver.Q(a, self)
+                    elif a == True:
+                        # it means this command was handled somewhere.
+                        pass
+                    elif data:
+                        # command not handled; notify user
+                        #self.send('%s not a valid command, please try again!' %
+                        #    cmd.__repr__())
+                        self.send('Please try again!')
+                        self.prompt()
+                    else:
+                        # blank command, send prompt
+                        self.prompt()
+
             except SocketError:
                 # XXX handling different codes may be nice
                 LOG.debug('%s got a socket error, terminating connection.',

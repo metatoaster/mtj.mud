@@ -5,6 +5,11 @@ of some rather raw ideas.
 Fresh ideas:
 -----------------------------------------------------------------------
 
+Quickies
+========
+- Word wrap
+- Paging (max 24 lines output for BBS post, help, etc)
+
 Exits
 =====
 - Two types
@@ -43,6 +48,8 @@ receives information or output (sendtouser) to the object.  Formatting too?
 - Instead of doing stuff in process_cmd, make a do_cmd that actually
   does the command.  Make process_cmd to find the object to action the cmd
   in
+- Make them into objects, and queue them.  So for instance, triggers need
+  to be done on dying could be created beforehand.
 
 
 Get Command

@@ -8,7 +8,7 @@ from config import *
 LOG = logging.getLogger("MudActions")
 
 
-class MudNotify():
+class MudNotify(object):
     """\
     Ancestor class to encapsulate notification routines.
 
@@ -70,11 +70,14 @@ class MudNotify():
         target, and second target.
 
         The removal behavior may have to be changed later.
+
+        Also, this method may need to be unified with MudObject
         """
         result = []
+        LOG.debug('clean children (%s, %s)', param.__repr__(), obj.__repr__())
         if param is True:
             if obj:
-                result.extend(obj._children)
+                result = obj.children
                 # remove extras.
                 if type(rem) not in (list, set):
                     rem = set([self.caller, self.target, self.second])
@@ -112,6 +115,7 @@ class MudNotify():
 
         This may be converted into a metaclass method?
         """
+        LOG.debug('%s(%s)', self.__repr__(), self.caller.__repr__())
         self._send()
         # XXX always True?
         return True
@@ -154,8 +158,10 @@ class MudAction(MudNotify):
 
         This may be converted into a metaclass method?
         """
-        result = self.action()
+        LOG.debug('%s(%s)', self.__repr__(), self.caller.__repr__())
+        # XXX check order
         self._send()
+        result = self.action()
         return result
 
     def action(self):
@@ -246,7 +252,8 @@ class History(MudNotify):
     """
 
     def setResponse(self): #, caller, target, others, caller_siblings):
-        self.callerMsg = self.caller.history()
+        if hasattr(self.caller, 'soul'):
+            self.callerMsg = self.caller.soul.history()
 
 
 class Say(MudNotify):
@@ -283,11 +290,17 @@ class Quit(MudAction):
         if self.trail:
             self.callerMsg = 'Quit what?'
         else:
+            # XXX don't message if quit didn't work
             self.caller_siblingsMsg = '%s has left this world.' % (self.caller)
 
     def action(self):
         if self.condition:
-            self.caller.quit()
+            soul = self.caller.soul
+            if soul:
+                # only those with souls can really quit
+                soul.quit()
+                self.caller._parent.remove(self.caller)
+        # reflect success/failure
         return True
         
 
@@ -308,10 +321,11 @@ class Help(MudNotify):
     def setResponse(self):
         if self.trail:
             doc = None
-            if self.trail in self.caller.cmds:
-                doc = self.caller.cmds[self.trail].__doc__
-            elif self.trail in self.caller.body.cmds:
-                doc = self.caller.body.cmds[self.trail].__doc__
+            if self.trail in self.caller._cmds:
+                doc = self.caller._cmds[self.trail].__doc__
+            # XXX disabling soul/body...
+            # elif self.trail in self.caller.body._cmds:
+            #     doc = self.caller.body._cmds[self.trail].__doc__
 
             if doc and doc != '':
                 self.callerMsg = doc.replace('\n', '\r\n')
@@ -320,10 +334,10 @@ class Help(MudNotify):
         else:
             self.callerMsg = self.__doc__.replace('\n', '\r\n')
             f = ['\r\n    Valid commands are:']
-            for c in self.caller.cmds:
+            for c in self.caller._cmds:
                 f.append('      - %s' % c)
-            for c in self.caller.body.cmds:
-                f.append('      - %s' % c)
+            # for c in self.caller.body._cmds:
+            #     f.append('      - %s' % c)
             self.callerMsg += '\r\n'.join(f)
 
 
