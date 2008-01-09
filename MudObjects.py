@@ -9,6 +9,7 @@ from collections import deque
 
 from config import *
 from MudActions import *
+from notify import *
 
 LOG = logging.getLogger("MudObjects")
 
