@@ -91,7 +91,7 @@ class MudObject(object):
         else:
             return input, ''
 
-    def process_cmd(self, input):
+    def process_cmd(self, input, sender=None):
         """\
         This method will process the input and find the command to
         execute, and will attempt to call each init_obj.
@@ -134,7 +134,7 @@ class MudObject(object):
                 objs = [obj]
             for target in objs:
                 # this line will always execute because self is not None
-                result = target.init_cmd(self, cmd, arg)
+                result = target.init_cmd(self, cmd, arg, sender=sender)
                 if result:
                     LOG.debug('%s.process_cmd, cmd in %s %s',
                               self.__repr__(), name, target.__repr__())
@@ -145,7 +145,7 @@ class MudObject(object):
 
         return result
 
-    def init_cmd(self, caller, cmd, arg):
+    def init_cmd(self, caller, cmd, arg, sender=None):
         """\
         This method will find the cmd from self._cmds (which must be
         a MudAction) and will construct it to action it.
@@ -187,10 +187,8 @@ class MudObject(object):
         if issubclass(aC, MudNotify):
             # XXX may need to parse the trail and construct the notify
               # with proper targets, etc.
-            a = aC(self, trail=arg)
+            a = aC(self, trail=arg, sender=sender)
             return a
-            # this is the old way
-            #return a.call()
         else:
             raise TypeError('%s (%s) is not subclass of MudNotify' %\
                 (aC, type(aC)))
@@ -199,7 +197,7 @@ class MudObject(object):
         LOG.debug('%s received %s', self.__repr__(), msg.__repr__())
 
     # XXX - may not be desirable for default
-    addNotify = ObjAddNotify
+    #addNotify = ObjAddNotify
     def add(self, obj):
         # assume contents to be list
         if obj._parent is not None:
@@ -209,13 +207,13 @@ class MudObject(object):
             return False
         obj._parent = self
         self._children.append(obj)
-        if self.addNotify:
-            e = self.addNotify(caller=self, target=obj)
-            e.call()
+        #if self.addNotify:
+        #    e = self.addNotify(caller=self, target=obj)
+        #    e()
         return True
 
     # XXX - may not be desirable for default
-    removeNotify = ObjRemoveNotify
+    #removeNotify = ObjRemoveNotify
     def remove(self, obj):
         result = False
         if obj not in self._children: 
@@ -251,12 +249,15 @@ class MudObject(object):
                 # notification
                 return False
         # else FIXME put warning
-        if self.removeNotify:
-            e = self.removeNotify(caller=self, target=obj)
-            e.call()
+        #if self.removeNotify:
+        #    e = self.removeNotify(caller=self, target=obj)
+        #    e()
         return True
 
-    def move_to(self, obj, target):
+    def move_obj_to(self, obj, target):
+        """\
+        This move takes place at the perspective of the parent.
+        """
         # FIXME - this is not atomic operation
         # remove could do partial things...
         if self.remove(obj):
@@ -403,7 +404,7 @@ class SoulGateKeeper(MudObject):
     def valid_cmd(self, cmd):
         return True
 
-    def init_cmd(self, caller, cmd, arg):
+    def init_cmd(self, caller, cmd, arg, sender=None):
         """\
         Overrides the default, as it needs to have exclusive control.
         """
@@ -430,10 +431,10 @@ class SoulGateKeeper(MudObject):
             self.soul._parent = body
             # FIXME - um, use the queue to move player into room?
             room = self.soul.driver.starting['main']
-            room.add(body)
-            body._parent = room
+            self.soul.driver.Q(Login(self.soul._parent, room, sender=self.soul))
             # XXX hackish to trick a look
-            self.soul.driver.Q(Look(self.soul._parent), self.soul)
+            # disabled here due to prompt...
+            #self.soul.driver.Q(Look(self.soul._parent, sender=self.soul))
             #self.soul.body.room = MudObject()
         return True
 
@@ -476,6 +477,8 @@ class Soul(MudObject):
 
         # keep tracks of incoming rawdata
         self.rawq = []
+
+        self.cmd_handler = None
 
         # the bodies
         self._parent = SoulGateKeeper(soul=self)
@@ -598,10 +601,10 @@ class Soul(MudObject):
                                  )
                         self.rec_history(data)
                     # send to queue
-                    a = self.body.process_cmd(cmd)
+                    a = self.body.process_cmd(cmd, sender=self)
                     logging.debug('process_cmd returns: %s', a.__repr__())
                     if isinstance(a, MudNotify):
-                        self.driver.Q(a, self)
+                        self.driver.Q(a)
                     elif a == True:
                         # it means this command was handled somewhere.
                         pass
@@ -609,8 +612,17 @@ class Soul(MudObject):
                         # command not handled; notify user
                         #self.send('%s not a valid command, please try again!' %
                         #    cmd.__repr__())
-                        self.send('Please try again!')
-                        self.prompt()
+                        # rough code
+                        if self.cmd_handler:
+                            # FIXME this is very very very hackish
+                            # optimized for Say ONLY
+                            self.driver.Q(
+                                self.cmd_handler(self.body, trail=data), 
+                                self
+                            )
+                        else:
+                            self.send('Please try again!')
+                            self.prompt()
                     else:
                         # blank command, send prompt
                         self.prompt()

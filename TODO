@@ -109,6 +109,42 @@ Finding item in inventory:
 Finding player logged on:
     Player in LoggedOnPlayer  # this may need a transient link
 
+May want to look into emulating sequence types.
+http://docs.python.org/ref/sequence-types.html
+
+Sequence would hook directly to children perhaps, with a __call__ that
+does what find_id does now.
+
+
+Unit Test
+=========
+
+Need to catch nasties like
+
+WARNING:runner:command '<notify.Login object, sender <MudObjects.Soul object at 0x2b74233e8d50>>' caused an exception
+WARNING:runner:Traceback (most recent call last):
+  File "/home/toaster/devel/python-devel/git/mtmud/runner.py", line 179, in _action
+    cmd()
+  File "/home/toaster/devel/python-devel/git/mtmud/MudActions.py", line 174, in __call__
+    result = self.action()
+  File "/home/toaster/devel/python-devel/git/mtmud/notify.py", line 121, in action
+    return target.add(caller)
+NameError: global name 'target' is not defined
+
+Exception in thread Thread-2:
+Traceback (most recent call last):
+  File "/usr/lib64/python2.5/threading.py", line 460, in __bootstrap
+    self.run()
+  File "/usr/lib64/python2.5/threading.py", line 440, in run
+    self.__target(*self.__args, **self.__kwargs)
+  File "/home/toaster/devel/python-devel/git/mtmud/runner.py", line 65, in _start
+    self._run()
+  File "/home/toaster/devel/python-devel/git/mtmud/runner.py", line 55, in _run
+    self._action()
+  File "/home/toaster/devel/python-devel/git/mtmud/runner.py", line 187, in _action
+    sender.send('A serious error has occurred!')
+NameError: global name 'sender' is not defined
+
 
 -----------------------------------------------------------------------
 Implemented Ideas:

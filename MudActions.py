@@ -27,6 +27,9 @@ class MudNotify(object):
             target_siblings=None, 
             target_children=None,
             trail=None,
+            sender=None,
+            *args,
+            **kwargs
         ):
         """\
         Parameters:
@@ -52,6 +55,11 @@ class MudNotify(object):
         self._target_siblings = target_siblings
         self._target_children = target_children
 
+        self.sender = sender
+        if self.sender is None:
+            # default should be whoever constructed this object
+            pass
+
         # default outputs
         self.callerMsg = None
         self.targetMsg = None
@@ -60,8 +68,6 @@ class MudNotify(object):
         self.caller_childrenMsg = None
         self.target_siblingsMsg = None
         self.target_childrenMsg = None
-
-        self.setResponse()
 
     def _get_clean_children(self, param, obj, rem=None):
         """\
@@ -109,16 +115,23 @@ class MudNotify(object):
                 self._target_siblings, self.target._parent)
     target_siblings = property(fget=_get__target_siblings)
 
-    def call(self):
+    def __call__(self):
         """\
         Call this method to send the message.
-
-        This may be converted into a metaclass method?
         """
         LOG.debug('%s(%s)', self.__repr__(), self.caller.__repr__())
+        self.setResponse()
         self._send()
         # XXX always True?
         return True
+
+    def __repr__(self):
+        s = '<%s.%s object, sender %s>' % (
+            self.__class__.__module__,
+            self.__class__.__name__,
+            self.sender.__repr__(),
+        )
+        return s
 
     def _send(self):
         """\
@@ -151,19 +164,26 @@ class MudAction(MudNotify):
     something if the action method is redefined.
     """
 
-    def call(self):
+    def __call__(self):
         """\
         Call this method to send the message and call action.
 
         This may be converted into a metaclass method?
         """
-        LOG.debug('%s(%s)', self.__repr__(), self.caller.__repr__())
-        # XXX check order
-        self._send()
-        result = self.action()
-        return result
+        self.result = self.action()
+        MudNotify.__call__(self)
+        self.post_action()
+        # XXX what kind of result code to return?
+        return self.result
 
     def action(self):
+        """\
+        Redefine this method to process other actions that may need to
+        happen before any output is sent.
+        """
+        return False
+
+    def post_action(self):
         """\
         Redefine this method to process other actions that may need to
         happen before any output is sent.
@@ -211,3 +231,29 @@ class MudActionMulti():
             else no siblings will be notified.
         """
         pass
+
+
+class MudPortal(MudAction):
+    """\
+    A portal.  Foundation class that encapsulates an exit.
+    """
+    # If this must be instantiated as an object (like, a portal), there
+    # needs to be a subclass that inherits from this and MudObject
+
+    # caller and target are interchangable.
+    # needs input direction, for things like mislead
+
+    _exit = '%s leaves %s.'
+    _enter = '%s enters.'
+
+    def __init__(self, *args, **kwargs):
+        MudAction.__init__(self, *args, **kwargs)
+
+    def __call__(self, user, direction, *args, **kwargs):
+        #if user in self.caller:
+        if user._parent == self.caller:
+            # move from caller to target
+            pass
+        elif user._parent == self.target:
+            # move from target to caller
+            pass

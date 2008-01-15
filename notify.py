@@ -38,6 +38,32 @@ class ObjRemoveNotify(MudNotify):
         self.targetMsg = 'You vanish from %s.' % (self.caller)
         self.caller_childrenMsg = '%s vanishes.' % (self.target)
 
+# XXX name this class better
+class ObjMove(MudAction):
+    """\
+    Ancestor class that moves caller from target to second.
+
+    This means it's initiated by caller.
+
+    Different from caller wanting to move target to second.
+    """
+
+    def setResponse(self): #, caller, target, others, caller_siblings):
+        # check result
+        if self.result:
+            self._caller_children = True
+            self.callerMsg = 'You move from %s to %s.' % (self.target, self.second)
+            self.targetMsg = '%s leaves you.' % (self.caller)
+            self.secondMsg = '%s enters you.' % (self.caller)
+            self.caller_siblingMsg = '%s moves to %s.' % (self.caller, self.second)
+        else:
+            self.callerMsg = 'You failed to move from %s to %s.' % (self.target, self.second)
+
+    def action(self):
+        if self.caller and self.target and self.second:
+            # all present
+            return self.target.move_obj_to(self.caller, self.second)
+
 
 class History(MudNotify):
     """\
@@ -88,7 +114,7 @@ class Quit(MudAction):
             # XXX don't message if quit didn't work
             self.caller_siblingsMsg = '%s has left this world.' % (self.caller)
 
-    def action(self):
+    def post_action(self):
         if self.condition:
             soul = self.caller.soul
             if soul:
@@ -97,7 +123,29 @@ class Quit(MudAction):
                 self.caller._parent.remove(self.caller)
         # reflect success/failure
         return True
-        
+
+
+class Login(MudAction):
+    """\
+    The Login action will log in a user (caller) into a room (target).
+    """
+
+    def setResponse(self): #, caller, target, others, caller_siblings):
+        # message every siblings
+        self._caller_siblings = True
+        self.caller_siblingsMsg = '%s arrives into this world.' % (self.caller)
+        self.callerMsg = 'You arrive into this world.'
+
+    def action(self):
+        return self.target.add(self.caller)
+
+    def post_action(self):
+        # doing a call directly here to "avoid" drawing the prompt.
+        # also to "emulate" an atomic call.
+        Look(self.caller)()
+        # reflect success/failure
+        return True
+
 
 class Help(MudNotify):
     """\
