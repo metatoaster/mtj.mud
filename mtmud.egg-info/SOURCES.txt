@@ -4,7 +4,6 @@ mtmud/MudActions.py
 mtmud/MudObjects.py
 mtmud/__init__.py
 mtmud/config.py
-mtmud/mtmud.py
 mtmud/mud.py
 mtmud/notify.py
 mtmud/runner.py
