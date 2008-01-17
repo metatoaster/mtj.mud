@@ -5,9 +5,7 @@
 # Interactive controller for mtmud
 
 from sys import stdout
-from mtmud.mud import *
-from mtmud.server import *
-from mtmud.runner import *
+from mtmud import *
 try:
     import readline
 except:
@@ -76,10 +74,12 @@ if __name__ == '__main__':
         # lolhack
         raise EOFError
 
+    # XXX - objects by these 3 lines could be constructed as one in a 
+    # startup class.
     driver = MudDriver()
     mudserv = MudServerController(host=HOST, port=PORT)
     driver.add(mudserv)
-    #mudserv.driver = driver
+
     active = True
     eval_mode = False
     prompts = {
@@ -135,5 +135,5 @@ if __name__ == '__main__':
     brake()
 
     # really quit.
-    sys.exit()
+    #sys.exit()
 
