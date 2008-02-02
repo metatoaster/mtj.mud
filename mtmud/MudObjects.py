@@ -264,6 +264,18 @@ class MudObject(object):
             return target.add(obj)
         return False
 
+    def move_to(self, target):
+        """\
+        This move takes place at the perspective of self.
+        """
+        # FIXME - this is not atomic operation
+        # remove could do partial things...
+        if self._parent:
+            result = self._parent.remove(self)
+        if result:
+            return target.add(self)
+        return False
+
     def find_id(self, id_):
         """\
         Finds the object by the id supplied.
@@ -370,18 +382,38 @@ class MudRoom(MudArea):
         self.exits = {}
 
 
-class MudExit(MudObject):
+class MudRoomExit(MudObject):
+    """\
+    Generic MudRoom Exits
+    """
     available_barrier = [None, 'door', 'gate', 'portal',]
 
-    def __init__(self, shortdesc='exit', *args, **kwargs):
-        # generic exit
+    def __init__(self, shortdesc='exit', room1=None, room2=None,
+            *args, **kwargs):
+        if not (isinstance(room1, MudRoom) and isstance(room2, MudRoom)):
+            raise ValueError('room1 and room2 must be MudRoom instances')
+
         MudObject.__init__(self, shortdesc=shortdesc, *args, **kwargs)
         self.barrier = None
-        self.exits = {}
+        self.open = True  # barrier is open
+        self.visible = True  # exit not hidden
+        self.active = True  # exit can be used
+        # XXX perhaps create a new class called reference, and use
+        # python's soft references.
+        self._children.add(room1)
+        self._children.add(room2)
         #self.exits = {
         #    'north': NorthRoom,
         #    'south': SouthRoom,
         #}
+
+    def add(self, obj):
+        # cant add
+        return False
+
+    def remove(self, obj):
+        # cant remove
+        return False
 
 
 class SoulGateKeeper(MudObject):

@@ -38,8 +38,8 @@ class ObjRemoveNotify(MudNotify):
         self.targetMsg = 'You vanish from %s.' % (self.caller)
         self.caller_childrenMsg = '%s vanishes.' % (self.target)
 
-# XXX name this class better
-class ObjMove(MudAction):
+
+class MoveObjFromTo(MudAction):
     """\
     Ancestor class that moves caller from target to second.
 
@@ -51,11 +51,9 @@ class ObjMove(MudAction):
     def setResponse(self): #, caller, target, others, caller_siblings):
         # check result
         if self.result:
-            self._caller_children = True
             self.callerMsg = 'You move from %s to %s.' % (self.target, self.second)
             self.targetMsg = '%s leaves you.' % (self.caller)
             self.secondMsg = '%s enters you.' % (self.caller)
-            self.caller_siblingMsg = '%s moves to %s.' % (self.caller, self.second)
         else:
             self.callerMsg = 'You failed to move from %s to %s.' % (self.target, self.second)
 
@@ -64,6 +62,49 @@ class ObjMove(MudAction):
             # all present
             return self.target.move_obj_to(self.caller, self.second)
 
+
+class MoveObjTo(MudAction):
+    """\
+    Ancestor class that moves caller from to second regardless where
+    it is.
+
+    This could cause inconsistent state if caller is in some place but
+    does not recognize that some place as its parent.
+    """
+
+    #   self.result = self.action()
+    #   # this calls setResponse and _send
+    #   MudNotify.__call__(self)
+    #   self.post_action()
+ 
+    # XXX - replace the replaced setResponse with init
+    def __init__(self, *args, **kwargs):
+        MudAction.__init__(self, *args, **kwargs)
+        self.second = self.caller._parent
+
+    def setResponse(self): #, caller, target, others, caller_siblings):
+        # check result
+        if self.result:
+            self.callerMsg = 'You move from %s to %s.' % (self.target, self.second)
+            self.targetMsg = '%s enters you.' % (self.caller)
+            self.secondMsg = '%s leaves you.' % (self.caller)
+            self.target_children = True
+            self.target_childrenMsg = '%s enters.'
+        else:
+            self.callerMsg = 'You failed to move from %s to %s.' % (self.target, self.second)
+
+    def action(self):
+        if self.caller and self.target:
+            # all present
+            return self.caller.move_to(self.target)
+
+
+class Go(MoveObjTo):
+    """\
+    Go (direction)
+
+    Looks for an exit in parent, if present, go.
+    """
 
 class History(MudNotify):
     """\
