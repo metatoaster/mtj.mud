@@ -26,6 +26,8 @@ class MudNotify(object):
             caller_children=None,
             target_siblings=None, 
             target_children=None,
+            second_siblings=None, 
+            second_children=None,
             trail=None,
             sender=None,
             *args,
@@ -54,6 +56,8 @@ class MudNotify(object):
         self._caller_children = caller_children
         self._target_siblings = target_siblings
         self._target_children = target_children
+        self._second_siblings = second_siblings
+        self._second_children = second_children
 
         self.sender = sender
         if self.sender is None:
@@ -68,6 +72,8 @@ class MudNotify(object):
         self.caller_childrenMsg = None
         self.target_siblingsMsg = None
         self.target_childrenMsg = None
+        self.second_siblingsMsg = None
+        self.second_childrenMsg = None
 
     def _get_clean_children(self, param, obj, rem=None):
         """\
@@ -115,6 +121,16 @@ class MudNotify(object):
                 self._target_siblings, self.target._parent)
     target_siblings = property(fget=_get__target_siblings)
 
+    def _get__second_children(self):
+        return self._get_clean_children(
+                self._second_children, self.second)
+    second_children = property(fget=_get__second_children)
+
+    def _get__second_siblings(self):
+        return self._get_clean_children(
+                self._second_siblings, self.second._parent)
+    second_siblings = property(fget=_get__second_siblings)
+
     def __call__(self):
         """\
         Call this method to send the message.
@@ -144,12 +160,27 @@ class MudNotify(object):
             self.target.send(self.targetMsg)
         if self.second and self.secondMsg:
             self.second.send(self.secondMsg)
+
         if self.caller_siblingsMsg:
             for cs in self.caller_siblings:
                 cs.send(self.caller_siblingsMsg)
         if self.caller_childrenMsg:
             for cs in self.caller_children:
                 cs.send(self.caller_childrenMsg)
+
+        if self.target_siblingsMsg:
+            for cs in self.target_siblings:
+                cs.send(self.target_siblingsMsg)
+        if self.target_childrenMsg:
+            for cs in self.target_children:
+                cs.send(self.target_childrenMsg)
+
+        if self.second_siblingsMsg:
+            for cs in self.second_siblings:
+                cs.send(self.second_siblingsMsg)
+        if self.second_childrenMsg:
+            for cs in self.second_children:
+                cs.send(self.second_childrenMsg)
 
     def setResponse(self): #, caller, target, others, caller_siblings):
         """\
@@ -171,6 +202,7 @@ class MudAction(MudNotify):
         This may be converted into a metaclass method?
         """
         self.result = self.action()
+        # this calls setResponse and _send
         MudNotify.__call__(self)
         self.post_action()
         # XXX what kind of result code to return?
@@ -233,9 +265,11 @@ class MudActionMulti():
         pass
 
 
-class MudPortal(MudAction):
+class MudActionPortal(MudAction):
     """\
     A portal.  Foundation class that encapsulates an exit.
+
+    This is built on Action
     """
     # If this must be instantiated as an object (like, a portal), there
     # needs to be a subclass that inherits from this and MudObject
