@@ -1,4 +1,4 @@
-from MudObjects import MudArea, MudRoom, MudExit
+from MudObjects import MudArea, MudRoom  #, MudExit
 
 # These classes could be quite temporary.
 class Foundation(MudArea):

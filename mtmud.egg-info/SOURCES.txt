@@ -1,10 +1,11 @@
+mudctrl
 setup.cfg
 setup.py
 mtmud/MudActions.py
 mtmud/MudObjects.py
 mtmud/__init__.py
 mtmud/config.py
-mtmud/mud.py
+mtmud/ctrl.py
 mtmud/notify.py
 mtmud/runner.py
 mtmud/server.py
