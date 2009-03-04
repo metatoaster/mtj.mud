@@ -198,3 +198,11 @@ This like reader/writer problem
 - the event processor is the writer
 - FIXME - need to demonstrate that this queue works by moving the say command
 to use this queue.
+
+
+Dynamic Aliases
+---------------
+
+Room exits - players will not want to type 'go' all the time, especially
+when we have an exit named portal.  Players will rather type 'portal' to
+go through that.

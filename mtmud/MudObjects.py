@@ -381,7 +381,6 @@ class MudWizard(MudPlayer):
         self._cmds['create'] = Create
 
 
-
 class MudMeta(MudObject):
     """
     Objects that are about/describe other object(s).
@@ -425,7 +424,7 @@ class MudRoomLink(MudMeta):
 
     # up exit =
 
-    def __init__(self, shortdesc='exit', longdesc=None, link=(),
+    def __init__(self, shortdesc='exit', longdesc=None, link=(), barrier,
             *args, **kwargs):
         """\
         Room exit init
@@ -448,26 +447,26 @@ class MudRoomLink(MudMeta):
             raise ValueError('an exit currently only supports two rooms')
 
         MudObject.__init__(self, shortdesc=shortdesc, *args, **kwargs)
-        self.barrier = None
+        self.barrier = None  # should be a barrier type.
         self.open = True  # barrier is open
         self.visible = True  # exit not hidden
         self.active = True  # exit can be used
         self.standard = True  # standard exit types
-        # XXX perhaps create a new class called reference, and use
-        # python's soft references.
-        #self._meta.add(room1)
-        #self._meta.add(room2)
 
-        for k, v in link:
-            # XXX warning, synchronization issue here?!
-            self._meta.append(k)
-            k._meta.append(self)
-
-        self.link = dict(link)
+        # Create the exit links first!  If we this metaobject to the
+        # rooms before the link is established, it's not too good.
 
         self._exit = {}
         self._exit[link[0][1]] = link[1][0]
         self._exit[link[1][1]] = link[0][0]
+
+        self.link = dict(link)
+
+        # If this object is created within the event loop, no race
+        # condition should be triggered.
+        for k, v in link:
+            self._meta.append(k)
+            k._meta.append(self)
 
         # Since room can have multiple exits with same name, a handler
         # should be written (like, alternate rooms if certain condition
