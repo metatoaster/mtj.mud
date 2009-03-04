@@ -1,29 +1,35 @@
-from MudObjects import MudArea, MudRoom  #, MudExit
+from MudObjects import MudArea, MudRoom, MudRoomLink
 
 # These classes could be quite temporary.
 class Foundation(MudArea):
     """Base area"""
     def __init__(self, *args, **kwargs):
         MudArea.__init__(self, *args, **kwargs)
-        self.add(StartRoom())
-        self.add(FlossRoom())
-        self.add(GreenRoom())
+        startroom = StartRoom()
+        flossroom = FlossRoom()
+        greenroom = GreenRoom()
+
+        MudRoomLink(link=((startroom, 'down'), (flossroom, 'up')))
+        MudRoomLink(link=((flossroom, 'east'), (greenroom, 'west')))
+
+        self.add(startroom)
+        self.add(flossroom)
+        self.add(greenroom)
 
 
 _StartRoom = """\
-    Upon entering this room, you feel a sense of tranquility fall upon
-you.  Thin, wispy tendrils of white vapor enshrouds everything; they
-rise and fall as if orchestrating a dance.  Further away, the vapor
-becomes thicker, yet not thick enough to prevent the soothing white
-light beyond from filtering through.  The white light is bright, yet
-soothing on your eyes, casts its rays on from all angles on everything
-in this room, easily dispelling most, if not all, shadows away.
+  A sense of tranquility falls upon you as you enter into this expanse.
+Thin, wispy tendrils of white vapor enshrouds everything; they rise and 
+fall as if orchestrating a dance.  As you bring your gaze further away,
+you find the mist obscuring the source of the white glow, rendering its
+glow to be soothing on your eyes rather than blinding.  Since the light
+casts from every direction, shadows cannot hold their presences here.
 """.replace('\n', '\r\n')
 
 class StartRoom(MudRoom):
     def __init__(self, *args, **kwargs):
         MudRoom.__init__(self, *args, **kwargs)
-        self.shortdesc = 'Entry Room'
+        self.shortdesc = 'White Expanse'
         self.longdesc = _StartRoom
 
 

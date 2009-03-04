@@ -201,12 +201,21 @@ class MudAction(MudNotify):
 
         This may be converted into a metaclass method?
         """
-        self.result = self.action()
+
+        self.result = False
+        if self.preparation():
+            self.result = self.action()
         # this calls setResponse and _send
         MudNotify.__call__(self)
         self.post_action()
         # XXX what kind of result code to return?
         return self.result
+
+    def preparation(self):
+        """\
+        Prepares the input.
+        """
+        return True
 
     def action(self):
         """\

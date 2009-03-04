@@ -3,8 +3,8 @@
 # This software is released under the GPLv3
 
 import logging
-from config import *
-from MudActions import *
+from mtmud.config import *
+from mtmud.MudActions import *
 
 LOG = logging.getLogger("actions")
 
@@ -88,7 +88,7 @@ class MoveObjTo(MudAction):
             self.callerMsg = 'You move from %s to %s.' % (self.target, self.second)
             self.targetMsg = '%s enters you.' % (self.caller)
             self.secondMsg = '%s leaves you.' % (self.caller)
-            self.target_children = True
+            self._target_children = True
             self.target_childrenMsg = '%s enters.'
         else:
             self.callerMsg = 'You failed to move from %s to %s.' % (self.target, self.second)
@@ -103,8 +103,53 @@ class Go(MoveObjTo):
     """\
     Go (direction)
 
-    Looks for an exit in parent, if present, go.
+    Looks for an exit in meta.
     """
+
+    def setResponse(self): #, caller, target, others, caller_siblings):
+        # message every siblings
+        self._caller_siblings = True
+        if self.result:
+            self.caller_siblingsMsg = '%s leaves %s.' % (self.caller, self.trail)
+            # XXX this needs to be set based on whether player has stealth
+            self._target_children = True
+            self.target_childrenMsg = '%s enters.' % (self.caller)
+        else:
+            if self.trail:
+                self.callerMsg = 'There is no %s exit.' % (self.trail)
+            else:
+                self.callerMsg = 'Where do you want to go?'
+
+    def preparation(self):
+        # XXX import failure!
+        from mtmud.MudObjects import MudRoomLink
+        # XXX room need to provide exit_t, to provide resolution of
+        # duplicated entries!
+        room = self.caller._parent
+        exit_t = [i.get_exit(room) for i in room._meta 
+                              if isinstance(i, MudRoomLink)]
+        # XXX duplicate exits NOT handled
+        LOG.debug('exits are %s, trail is "%s"', exit_t, self.trail)
+        exit_d = dict(exit_t)
+        if self.trail in exit_d:
+            self.target = exit_d[self.trail]
+            return True
+
+    # XXX HACK action is done later
+    # Need to implement caller_sibling before action happened
+
+    def post_action(self):
+        if self.caller and self.target:
+            # all present
+            result = self.caller.move_to(self.target)
+            if result:
+                Look(self.caller)()
+            return result
+
+    def action(self):
+        self.result = True
+        return True
+
 
 class History(MudNotify):
     """\
@@ -231,7 +276,16 @@ class _Look():
         x = []
         x.append('%s\r\n\r\n%s\r\n' % (room.shortdesc, room.longdesc))
         # if type(room):
-        x.append('        There are no obvious exits.\r\n\r\n')
+        # XXX fail here!
+        from mtmud.MudObjects import MudRoomLink
+        exits = [i.link[room] for i in room._meta 
+                              if isinstance(i, MudRoomLink)]
+        if not exits:
+            x.append('        There are no obvious exits.\r\n\r\n')
+        else:
+            # XXX implement not obvious exits
+            x.append('        Obvious exits are %s.\r\n\r\n' %
+                     ', '.join(exits))
         for c in contents:
             x.append(' %s\r\n' % c)
         return ''.join(x)

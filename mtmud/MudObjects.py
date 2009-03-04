@@ -62,6 +62,11 @@ class MudObject(object):
         self._parent = None  # XXX - can we make this more... dynamic?
         self._hb = None  # heartbeat
 
+        # these are NOT exactly children
+        # XXX since these are probably type dependent, we might want to
+        # implement a list/dict hybrid object?
+        self._meta = []  # XXX - meta objects, objects about this object?
+
     def __iter__(self):
         return self._children.__iter__()
 
@@ -171,10 +176,15 @@ class MudObject(object):
             self/target self.parent
             caller/self
             """
-            cmds = self._parent_cmds
-        elif self in caller.children:
-            # implies self._parent == caller
+            # if the initializer (self) is the caller's parent, then it
+            # should look for commands inside the set of commands for
+            # its children (e.g room provides look for children)
             cmds = self._children_cmds
+        elif self in caller.children:
+            # if the initializer is inside children, then it should let
+            # the parent know whether there are commands for it (e.g.
+            # player's get command)
+            cmds = self._parent_cmds
         elif self in caller.siblings:
             cmds = self._siblings_cmds
 
@@ -187,7 +197,8 @@ class MudObject(object):
         if issubclass(aC, MudNotify):
             # XXX may need to parse the trail and construct the notify
               # with proper targets, etc.
-            a = aC(self, trail=arg, sender=sender)
+            # not self, *caller*
+            a = aC(caller, trail=arg, sender=sender)
             return a
         else:
             raise TypeError('%s (%s) is not subclass of MudNotify' %\
@@ -307,6 +318,7 @@ class MudSprite(MudObject):
         MudObject.__init__(self, *args, **kwargs)
 
     def send(self, msg):
+        # XXX fail here!
         if self.soul and type(self.soul) is Soul:
             self.soul.send(msg)
 
@@ -369,51 +381,116 @@ class MudWizard(MudPlayer):
         self._cmds['create'] = Create
 
 
+
+class MudMeta(MudObject):
+    """
+    Objects that are about/describe other object(s).
+    """
+
+
 class MudArea(MudObject):
     def __init__(self, *args, **kwargs):
         # generic mudarea
         MudObject.__init__(self, *args, **kwargs)
+
+    # it could have the action 'go' in here, for instance, rooms
+    # that are just a part of a big room could be tracked by an array
 
 
 class MudRoom(MudArea):
     def __init__(self, shortdesc='Empty Room', *args, **kwargs):
         # generic mudroom
         MudObject.__init__(self, shortdesc=shortdesc, *args, **kwargs)
-        self.exits = {}
+
+        self._children_cmds = {
+            'go': Go,
+        }
+
+    # it needs to have the action 'go' in here.
 
 
-class MudRoomExit(MudObject):
+class MudRoomLink(MudMeta):
     """\
-    Generic MudRoom Exits
+    Generic MudRoom Exits, these describes rooms, so meta.
     """
     available_barrier = [None, 'door', 'gate', 'portal',]
 
-    def __init__(self, shortdesc='exit', room1=None, room2=None,
+    base_pairs = [
+        ('north', 'south'),
+        ('east', 'west'),
+        ('up', 'down'),
+    ]
+    pairs = base_pairs + [(b, a) for a, b in base_pairs]
+    pair_dict = dict(pairs)
+
+    # up exit =
+
+    def __init__(self, shortdesc='exit', longdesc=None, link=(),
             *args, **kwargs):
-        if not (isinstance(room1, MudRoom) and isstance(room2, MudRoom)):
-            raise ValueError('room1 and room2 must be MudRoom instances')
+        """\
+        Room exit init
+
+        link is a two element tuple of a two element tuple in the form
+        of type (MudRoom, string)
+
+        MudRoom is any MudRoom object.
+        string is the name of the exit from that room
+        
+        Example:
+        ((EntranceRoom, 'east'), (LobbyRoom, 'west'))
+
+        This basically mean EntranceRoom has an 'east' exit to the other
+        room (i.e. LobbyRoom), and LobbyRoom has a 'west' exit back.
+        """
+
+        if len(link) != 2:
+            # we do need very explicit validation here
+            raise ValueError('an exit currently only supports two rooms')
 
         MudObject.__init__(self, shortdesc=shortdesc, *args, **kwargs)
         self.barrier = None
         self.open = True  # barrier is open
         self.visible = True  # exit not hidden
         self.active = True  # exit can be used
+        self.standard = True  # standard exit types
         # XXX perhaps create a new class called reference, and use
         # python's soft references.
-        self._children.add(room1)
-        self._children.add(room2)
-        #self.exits = {
-        #    'north': NorthRoom,
-        #    'south': SouthRoom,
-        #}
+        #self._meta.add(room1)
+        #self._meta.add(room2)
+
+        for k, v in link:
+            # XXX warning, synchronization issue here?!
+            self._meta.append(k)
+            k._meta.append(self)
+
+        self.link = dict(link)
+
+        self._exit = {}
+        self._exit[link[0][1]] = link[1][0]
+        self._exit[link[1][1]] = link[0][0]
+
+        # Since room can have multiple exits with same name, a handler
+        # should be written (like, alternate rooms if certain condition
+        # happens.
 
     def add(self, obj):
         # cant add
-        return False
+        raise NotImplementedError
 
     def remove(self, obj):
         # cant remove
-        return False
+        raise NotImplementedError
+
+    def get_exit(self, room):
+        """
+        get_exit returns the exit that this room links to
+        
+        returns tuple in the form of (exit_id, next_room)
+        """
+
+        exit_id = self.link[room]
+        next_room = self._exit[exit_id]
+        return exit_id, next_room
 
 
 class SoulGateKeeper(MudObject):
@@ -478,6 +555,7 @@ class Soul(MudObject):
     This object could inherit from MudRunner and replace what 
     MudThread does.
     """
+
     # Would be nice if this is a body transfer technique
     def set_body(self, body): self._parent = body
     body = property(
@@ -645,12 +723,14 @@ class Soul(MudObject):
                         #self.send('%s not a valid command, please try again!' %
                         #    cmd.__repr__())
                         # rough code
+                        # XXX this is not really executed because
+                        # cmd_handler is None?
                         if self.cmd_handler:
                             # FIXME this is very very very hackish
                             # optimized for Say ONLY
                             self.driver.Q(
                                 self.cmd_handler(self.body, trail=data), 
-                                self
+                                self,
                             )
                         else:
                             self.send('Please try again!')
