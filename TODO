@@ -206,3 +206,15 @@ Dynamic Aliases
 Room exits - players will not want to type 'go' all the time, especially
 when we have an exit named portal.  Players will rather type 'portal' to
 go through that.
+
+As for other aliases, lookup of alias table is done only ONCE, so that
+infinte loop from alias lookup cannot be created.
+
+
+Valid command lists
+-------------------
+
+We want to define a set of commands at the object level, so it will be a
+singleton that all objects of the same type can reference (especially
+when it is updated).  However we also want the instance of the object to
+add/remove (override) arbitrary commands.

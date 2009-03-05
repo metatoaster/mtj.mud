@@ -121,16 +121,10 @@ class Go(MoveObjTo):
                 self.callerMsg = 'Where do you want to go?'
 
     def preparation(self):
-        # XXX import failure!
-        from mtmud.MudObjects import MudRoomLink
-        # XXX room need to provide exit_t, to provide resolution of
-        # duplicated entries!
-        room = self.caller._parent
-        exit_t = [i.get_exit(room) for i in room._meta 
-                              if isinstance(i, MudRoomLink)]
-        # XXX duplicate exits NOT handled
-        LOG.debug('exits are %s, trail is "%s"', exit_t, self.trail)
-        exit_d = dict(exit_t)
+        links = self.caller._parent.get_links(self.trail)
+        # rooms with multiple exits will need to implement hooks
+        # XXX naive implementation
+        exit_d = dict(links)
         if self.trail in exit_d:
             self.target = exit_d[self.trail]
             return True
@@ -275,11 +269,7 @@ class _Look():
     def _look(self, room, contents):
         x = []
         x.append('%s\r\n\r\n%s\r\n' % (room.shortdesc, room.longdesc))
-        # if type(room):
-        # XXX fail here!
-        from mtmud.MudObjects import MudRoomLink
-        exits = [i.link[room] for i in room._meta 
-                              if isinstance(i, MudRoomLink)]
+        exits = room.roomlinks
         if not exits:
             x.append('        There are no obvious exits.\r\n\r\n')
         else:

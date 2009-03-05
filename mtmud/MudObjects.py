@@ -34,6 +34,8 @@ class MudObject(object):
         self.shortdesc = shortdesc if shortdesc else type(self).__name__
         self.longdesc = longdesc
 
+        # XXX make the initiation of these create a singleton for the
+        # class this represents.
         # commands for this object (should only used by self)
         self._cmds = {}
         # commands usable by siblings
@@ -72,6 +74,8 @@ class MudObject(object):
 
     def __str__(self):
         return self.shortdesc
+
+    # XXX implement __getitem__ and the like that grabs childrens
 
     def _get_children(self):
         result = []
@@ -309,6 +313,10 @@ class MudObject(object):
         return result
 
     id = property(fget=_get_id)
+    
+    @property
+    def parent(self):
+        return self._parent
 
 
 class MudSprite(MudObject):
@@ -405,7 +413,31 @@ class MudRoom(MudArea):
             'go': Go,
         }
 
-    # it needs to have the action 'go' in here.
+    @property
+    def __meta_link(self):
+        # temporary method that will return just MudRoomLink meta 
+        # objects.  Will be removed when we can easily return meta
+        # objects by type.
+        return [i for i in self._meta if isinstance(i, MudRoomLink)]
+
+    @property
+    def roomlinks(self):
+        """\
+        Returns the complete list of room links.
+
+        Further filtering can be done.
+        """
+
+        return [i.link[self] for i in self.__meta_link]
+
+    def get_links(self, link_id):
+        """\
+        Returns the link through the link_id (i.e. direction).
+        """
+
+        all_links = [i.get_link(self) for i in self.__meta_link]
+        links = [i for i in all_links if i[0] == link_id]
+        return links
 
 
 class MudRoomLink(MudMeta):
@@ -424,7 +456,7 @@ class MudRoomLink(MudMeta):
 
     # up exit =
 
-    def __init__(self, shortdesc='exit', longdesc=None, link=(), barrier,
+    def __init__(self, shortdesc='exit', longdesc=None, link=(), barrier=None,
             *args, **kwargs):
         """\
         Room exit init
@@ -461,10 +493,12 @@ class MudRoomLink(MudMeta):
         self._exit[link[1][1]] = link[0][0]
 
         self.link = dict(link)
+        # nobody must touch this
+        self.__link = tuple(link)
 
         # If this object is created within the event loop, no race
         # condition should be triggered.
-        for k, v in link:
+        for k, v in self.__link:
             self._meta.append(k)
             k._meta.append(self)
 
@@ -480,9 +514,9 @@ class MudRoomLink(MudMeta):
         # cant remove
         raise NotImplementedError
 
-    def get_exit(self, room):
+    def get_link(self, room):
         """
-        get_exit returns the exit that this room links to
+        get_link returns the exit that this room links to
         
         returns tuple in the form of (exit_id, next_room)
         """
@@ -490,6 +524,16 @@ class MudRoomLink(MudMeta):
         exit_id = self.link[room]
         next_room = self._exit[exit_id]
         return exit_id, next_room
+
+    def destroy(self):
+        """\
+        Destroys this link.
+        """
+
+        for k, v in self.__link:
+            # we only need to remove the external references to this.
+            if self in k._meta:
+                k._meta.remove(self)
 
 
 class SoulGateKeeper(MudObject):
