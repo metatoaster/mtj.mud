@@ -1,11 +1,11 @@
-# mtmud.mud - A Basic Mud library in Python
+# mtj.mud - A Basic Mud library in Python
 # Copyright (c) 2007 Tommy Yu
 # This software is released under the GPLv3
 
 import logging
 from config import *
-from mtmud.server import *
-from mtmud.runner import *
+from mtj.mud.server import *
+from mtj.mud.runner import *
 
 # XXX - perhaps move this to a local logging class
 logging.basicConfig(level=logging.WARNING)

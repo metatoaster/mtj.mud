@@ -2,11 +2,11 @@
 # Copyright (c) 2007 Tommy Yu
 # This software is released under the GPLv3
 
-# Interactive controller for mtmud
+# Interactive controller for mtj.mud
 
 from sys import stdout
-import mtmud
-from mtmud import *
+import mtj.mud
+from mtj.mud import *
 try:
     import readline
 except:
@@ -17,8 +17,8 @@ class mudctrl:
     def __init__(self):
         # XXX - objects by these 3 lines could be constructed as one in a 
         # startup class.
-        self.driver = mtmud.MudDriver()
-        self.mudserv = mtmud.MudServerController(host=HOST, port=PORT)
+        self.driver = mtj.mud.MudDriver()
+        self.mudserv = mtj.mud.MudServerController(host=HOST, port=PORT)
         self.driver.add(self.mudserv)
         self.active = True
         self.eval_mode = False
@@ -90,7 +90,7 @@ class mudctrl:
     def level(self, arg=None):
         if arg and arg.isdigit():
             level = int(arg)
-            mtmud.setLogLevel(level)
+            mtj.mud.setLogLevel(level)
             print 'Log level set to %s' % logging.getLevelName(level)
         else:
             # XXX perhaps use the string identifiers for level id also
@@ -113,7 +113,7 @@ class mudctrl:
         # XXX cheese
         import __builtin__ as __builtins__
 
-        print 'Starting mtmud interactive shell.'
+        print 'Starting mtj.mud interactive shell.'
         while mud.active:
             try:
                 # XXX might want to use code.InteractiveConsole

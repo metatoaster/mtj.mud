@@ -4,9 +4,9 @@ import logging
 import threading
 
 from config import *
-from MudObjects import *
+from objects import *
 
-LOG = logging.getLogger('server')
+LOG = logging.getLogger('mtj.mud.server')
 
 class MudConnThread:
     """Based on ThreadingMixIn of the SocketServer module.

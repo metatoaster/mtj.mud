@@ -1,4 +1,4 @@
-# mtmud.mud - A Basic Mud library in Python
+# mtj.mud - A Basic Mud library in Python
 # Copyright (c) 2007 Tommy Yu
 # This software is released under the GPLv3
 
@@ -8,10 +8,10 @@ from socket import error as SocketError
 from collections import deque
 
 from config import *
-from MudActions import *
+from actions import *
 from notify import *
 
-LOG = logging.getLogger("MudObjects")
+LOG = logging.getLogger("mtj.mud.objects")
 
 
 class MudObject(object):

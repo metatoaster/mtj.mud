@@ -1,4 +1,4 @@
-# mtmud.mud - A Basic Mud library in Python
+# mtj.mud - A Basic Mud library in Python
 # Copyright (c) 2007 Tommy Yu
 # This software is released under the GPLv3
 
@@ -11,11 +11,11 @@ import time
 
 from config import *
 from server import *
-from MudObjects import *
-from MudActions import *
+from objects import *
+from actions import *
 from world import *
 
-LOG = logging.getLogger("runner")
+LOG = logging.getLogger('mtj.mud.runner')
 
 
 class MudRunner(MudObject):
