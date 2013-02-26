@@ -362,6 +362,7 @@ class MudPlayer(MudSprite):
         self._cmds = {
             'look': Look,
             'say': Say,
+            ':': Emote,
             'quit': Quit,
             'history': History,
             'help': Help,

@@ -176,6 +176,23 @@ class Say(MudNotify):
                 'detrimental to your health.'
 
 
+class Emote(MudNotify):
+    """\
+    Usage: emote <message>
+
+    The say command emotes <message> to everyone in the room.
+    """
+
+    def setResponse(self): #, caller, target, others, caller_siblings):
+        # message every siblings
+        self._caller_siblings = True
+        if self.trail:
+            self.callerMsg = '::: %s %s :::' % (self.caller, self.trail)
+            self.caller_siblingsMsg = '::: %s %s :::' % (self.caller, self.trail)
+        else:
+            self.callerMsg = 'What do you want to emote?'
+
+
 class Quit(MudAction):
     """\
     Usage: quit
