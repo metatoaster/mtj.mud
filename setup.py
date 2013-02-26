@@ -3,16 +3,15 @@ import sys, os
 
 version = '0'
 
-setup(name='mtmud',
+setup(name='mtj.mud',
       version=version,
-      description="Basic Mud Package",
-      long_description="""\
-""",
+      description="MTJ Mud Engine",
+      long_description="""""",
       classifiers=[], # Get strings from http://pypi.python.org/pypi?%3Aaction=list_classifiers
       keywords='MUD',
       author='Tommy Yu',
       author_email='y@metatoaster.com',
-      url='',
+      url='https://github.com/metatoaster/mtj.mud',
       license='GPL',
       scripts=['mudctrl'],
       packages=find_packages(exclude=['ez_setup', 'examples', 'tests']),
